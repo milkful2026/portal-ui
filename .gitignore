@@ -7,3 +7,12 @@
 node_modules/
 dist/
 build/
+coverage/
+
+# Test artifacts
+playwright-report/
+test-results/
+.vitest-cache/
+
+# Editor / OS
+.DS_Store
