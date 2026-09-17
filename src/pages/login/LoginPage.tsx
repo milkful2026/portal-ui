@@ -8,7 +8,7 @@ import Typography from '@mui/material/Typography';
 import Alert from '@mui/material/Alert';
 import CircularProgress from '@mui/material/CircularProgress';
 import { authApi } from '../../api/client';
-import { ApiError } from '../../api/types';
+import { AdminErrorCode, ApiError } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 
 export default function LoginPage() {
@@ -34,15 +34,16 @@ export default function LoginPage() {
     try {
       const data = await authApi.login({ email, password });
       clearSessionMessage();
-      navigate('/login/2fa', { state: { mfaToken: data.mfaToken, from: location.state?.from } });
+      navigate('/login/2fa', { state: { challengeToken: data.challengeToken, from: location.state?.from } });
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.code === 'NETWORK_ERROR') {
           setBannerError("Couldn't reach the server. Check your connection and try again.");
-        } else if (err.code === 'INVALID_CREDENTIALS') {
+        } else if (err.code === AdminErrorCode.INCORRECT_CREDENTIALS) {
           setCredentialError(err.message);
         } else {
-          // ACCOUNT_PENDING, ACCOUNT_DEACTIVATED, TOO_MANY_ATTEMPTS
+          // ADMIN_ACCOUNT_PENDING, ADMIN_ACCOUNT_DEACTIVATED, and any
+          // other rejection the password step can return.
           setBannerError(err.message);
         }
       } else {

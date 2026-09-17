@@ -1,4 +1,4 @@
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { Link as RouterLink, useLocation, useNavigate } from 'react-router-dom';
 import Box from '@mui/material/Box';
 import Paper from '@mui/material/Paper';
@@ -8,14 +8,15 @@ import Typography from '@mui/material/Typography';
 import Link from '@mui/material/Link';
 import CircularProgress from '@mui/material/CircularProgress';
 import { authApi } from '../../api/client';
-import { ApiError } from '../../api/types';
+import { AdminErrorCode, ApiError } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 
 export default function TwoFactorPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { setSession } = useAuth();
-  const mfaToken = (location.state as { mfaToken?: string; from?: { pathname: string } } | null)?.mfaToken;
+  const { setSession, clearSession } = useAuth();
+  const challengeToken = (location.state as { challengeToken?: string; from?: { pathname: string } } | null)
+    ?.challengeToken;
   const from = (location.state as { from?: { pathname: string } } | null)?.from?.pathname ?? '/';
 
   const [code, setCode] = useState('');
@@ -23,9 +24,18 @@ export default function TwoFactorPage() {
   const [locked, setLocked] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  if (!mfaToken) {
-    // Reached directly without completing step 1.
-    navigate('/login', { replace: true });
+  useEffect(() => {
+    // Reached directly without completing step 1 (refresh, bookmark,
+    // back button). Navigating from a useEffect rather than during
+    // render avoids triggering a router state update mid-render — an
+    // anti-pattern that's especially fragile under React 18
+    // StrictMode's double-invoked renders.
+    if (!challengeToken) {
+      navigate('/login', { replace: true });
+    }
+  }, [challengeToken, navigate]);
+
+  if (!challengeToken) {
     return null;
   }
 
@@ -34,15 +44,25 @@ export default function TwoFactorPage() {
     setError(null);
     setSubmitting(true);
     try {
-      const data = await authApi.verify2fa({ mfaToken: mfaToken!, code });
+      const data = await authApi.verify2fa({ challengeToken: challengeToken!, code });
       setSession(data.accessToken);
       navigate(from, { replace: true });
     } catch (err) {
       if (err instanceof ApiError) {
-        if (err.code === 'TOO_MANY_ATTEMPTS') {
+        if (err.code === AdminErrorCode.ADMIN_ACCOUNT_LOCKED) {
           setLocked(true);
+          setError(err.message);
+        } else if (err.code === AdminErrorCode.CHALLENGE_EXPIRED) {
+          // Distinct from a wrong code: the challenge itself is no
+          // longer valid (TTL elapsed, or the admin's status changed
+          // mid-window) — restart from the password step rather than
+          // showing "incorrect code" and leaving them retrying against
+          // a token that can never succeed again.
+          clearSession('Your login attempt expired. Please log in again.');
+          navigate('/login', { replace: true });
+        } else {
+          setError(err.message);
         }
-        setError(err.message);
       } else {
         setError('Something went wrong. Try again.');
       }

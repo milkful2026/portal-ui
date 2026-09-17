@@ -5,6 +5,8 @@ export const MOCK_TOTP_CODE = '123456';
 
 /** In-memory admin directory for MSW. Reset on page reload — this is a dev/test
  * mock only, per the constraint not to call or expect a live backend. */
+const SEEDED_AT = '2026-09-01T00:00:00.000Z';
+
 export let adminUsers: AdminUser[] = [
   {
     id: 'admin-1',
@@ -13,6 +15,11 @@ export let adminUsers: AdminUser[] = [
     role: 'SuperAdmin',
     status: 'Active',
     lastLoginAt: '2026-09-14T09:12:00.000Z',
+    ipAllowlist: [],
+    maxConcurrentSessions: null,
+    createdBy: null,
+    createdAt: SEEDED_AT,
+    updatedAt: SEEDED_AT,
   },
   {
     id: 'admin-2',
@@ -21,6 +28,11 @@ export let adminUsers: AdminUser[] = [
     role: 'Ops',
     status: 'Active',
     lastLoginAt: '2026-09-15T08:03:00.000Z',
+    ipAllowlist: [],
+    maxConcurrentSessions: null,
+    createdBy: 'admin-1',
+    createdAt: SEEDED_AT,
+    updatedAt: SEEDED_AT,
   },
   {
     id: 'admin-3',
@@ -29,6 +41,11 @@ export let adminUsers: AdminUser[] = [
     role: 'Finance',
     status: 'Active',
     lastLoginAt: null,
+    ipAllowlist: [],
+    maxConcurrentSessions: null,
+    createdBy: 'admin-1',
+    createdAt: SEEDED_AT,
+    updatedAt: SEEDED_AT,
   },
   {
     id: 'admin-4',
@@ -37,6 +54,11 @@ export let adminUsers: AdminUser[] = [
     role: 'Support',
     status: 'Pending',
     lastLoginAt: null,
+    ipAllowlist: [],
+    maxConcurrentSessions: null,
+    createdBy: 'admin-1',
+    createdAt: SEEDED_AT,
+    updatedAt: SEEDED_AT,
   },
   {
     id: 'admin-5',
@@ -45,6 +67,11 @@ export let adminUsers: AdminUser[] = [
     role: 'Marketing',
     status: 'Deactivated',
     lastLoginAt: '2026-08-01T11:45:00.000Z',
+    ipAllowlist: [],
+    maxConcurrentSessions: null,
+    createdBy: 'admin-1',
+    createdAt: SEEDED_AT,
+    updatedAt: SEEDED_AT,
   },
 ];
 

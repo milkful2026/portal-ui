@@ -240,16 +240,22 @@ export default function AdminUsersPage() {
                 <TableCell component="th" scope="col">Email</TableCell>
                 <TableCell component="th" scope="col">Role</TableCell>
                 <TableCell component="th" scope="col">Status</TableCell>
-                {(!isTablet || showLastLogin) && (
-                  <TableCell component="th" scope="col">Last Login</TableCell>
-                )}
-                {isTablet && (
-                  <TableCell component="th" scope="col">
+                <TableCell component="th" scope="col">
+                  {/* Always exactly one header cell for this column, on every
+                      breakpoint, so it can never drift out of sync with the
+                      body's one matching cell per row below — previously a
+                      separate toggle-button header cell existed ONLY on
+                      tablet in addition to this one, giving the header one
+                      more column than any body row and misaligning
+                      everything after it (including Actions). */}
+                  {isTablet ? (
                     <Button size="small" onClick={() => setShowLastLogin((v) => !v)}>
-                      {showLastLogin ? 'Hide' : 'Last Login'}
+                      {showLastLogin ? 'Last Login ▲' : 'Last Login'}
                     </Button>
-                  </TableCell>
-                )}
+                  ) : (
+                    'Last Login'
+                  )}
+                </TableCell>
                 <TableCell component="th" scope="col">Actions</TableCell>
               </TableRow>
             </TableHead>
@@ -262,7 +268,7 @@ export default function AdminUsersPage() {
                   <TableCell>
                     <StatusBadge status={admin.status} />
                   </TableCell>
-                  {(!isTablet || showLastLogin) && <TableCell>{formatLastLogin(admin.lastLoginAt)}</TableCell>}
+                  <TableCell>{isTablet && !showLastLogin ? null : formatLastLogin(admin.lastLoginAt)}</TableCell>
                   <TableCell>
                     <IconButton aria-label={`Actions for ${admin.name}`} onClick={(e) => openMenu(e, admin)}>
                       <MoreVertIcon />
@@ -276,14 +282,21 @@ export default function AdminUsersPage() {
       )}
 
       <Menu anchorEl={menuAnchor} open={Boolean(menuAnchor)} onClose={closeMenu}>
-        <MenuItem
-          onClick={() => {
-            setEditingAdmin(menuAdmin);
-            closeMenu();
-          }}
+        <Tooltip
+          title={menuAdmin && user && menuAdmin.id === user.id ? 'You cannot change your own role.' : ''}
         >
-          Edit Role
-        </MenuItem>
+          <span>
+            <MenuItem
+              disabled={Boolean(menuAdmin && user && menuAdmin.id === user.id)}
+              onClick={() => {
+                setEditingAdmin(menuAdmin);
+                closeMenu();
+              }}
+            >
+              Edit Role
+            </MenuItem>
+          </span>
+        </Tooltip>
         {menuAdmin?.status === 'Deactivated' ? (
           <MenuItem onClick={() => menuAdmin && handleReactivate(menuAdmin)}>Reactivate</MenuItem>
         ) : (

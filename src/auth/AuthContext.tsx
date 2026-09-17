@@ -1,7 +1,7 @@
 import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { jwtDecode } from 'jwt-decode';
 import { AdminRole } from '../api/types';
-import { setAccessTokenGetter, setOnAccessRevoked, setOnSessionExpired } from '../api/client';
+import { setAccessTokenGetter, setOnSessionExpired } from '../api/client';
 
 const STORAGE_KEY = 'portal-ui.accessToken';
 
@@ -46,17 +46,24 @@ function decodeUser(token: string): AuthUser | null {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [accessToken, setAccessToken] = useState<string | null>(null);
-  const [user, setUser] = useState<AuthUser | null>(null);
   const [initializing, setInitializing] = useState(true);
   const [sessionMessage, setSessionMessage] = useState<string | null>(null);
+
+  // Derived, not separate state: `user` is always exactly
+  // `decodeUser(accessToken)`. Previously these were two independent
+  // `useState`s kept in sync by hand across 3 call sites (init effect,
+  // setSession, clearSession) — a future 4th place that updates
+  // accessToken (e.g. a silent-refresh handler) could easily forget to
+  // also update `user`, leaving the UI showing a stale identity while
+  // the token itself had changed. Deriving removes that failure mode
+  // entirely rather than relying on remembering to keep them in sync.
+  const user = useMemo<AuthUser | null>(() => (accessToken ? decodeUser(accessToken) : null), [accessToken]);
 
   useEffect(() => {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
-      const decoded = decodeUser(stored);
-      if (decoded) {
+      if (decodeUser(stored)) {
         setAccessToken(stored);
-        setUser(decoded);
       } else {
         localStorage.removeItem(STORAGE_KEY);
       }
@@ -67,15 +74,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const clearSession = useCallback((message?: string) => {
     localStorage.removeItem(STORAGE_KEY);
     setAccessToken(null);
-    setUser(null);
     if (message) setSessionMessage(message);
   }, []);
 
   const setSession = useCallback((token: string) => {
-    const decoded = decodeUser(token);
+    if (!decodeUser(token)) {
+      // A token that doesn't decode to a usable AuthUser (malformed,
+      // missing/empty `cognito:groups` role claim, or already expired)
+      // must not be persisted — storing it anyway would leave
+      // `accessToken` truthy while the derived `user` above is null:
+      // RequireAuth bounces to /login, but the unusable token would
+      // remain in localStorage and keep getting attached as
+      // `Authorization: Bearer …` on every subsequent request.
+      localStorage.removeItem(STORAGE_KEY);
+      setAccessToken(null);
+      setSessionMessage('Something went wrong signing you in. Please try again.');
+      return;
+    }
     localStorage.setItem(STORAGE_KEY, token);
     setAccessToken(token);
-    setUser(decoded);
     setSessionMessage(null);
   }, []);
 
@@ -87,12 +104,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setOnSessionExpired(() => {
       clearSession('Your session expired. Please log in again.');
     });
-    setOnAccessRevoked(() => {
-      clearSession('Your access has changed. Please log in again.');
-    });
     return () => {
       setOnSessionExpired(null);
-      setOnAccessRevoked(null);
     };
   }, [clearSession]);
 

@@ -15,10 +15,10 @@ test('locks out after 5 consecutive failed 2FA attempts', async ({ page }) => {
     await page.getByRole('button', { name: 'Verify' }).click();
 
     if (attempt < 5) {
-      await expect(page.getByText('Incorrect code. Try again.')).toBeVisible();
+      await expect(page.getByText('Incorrect verification code')).toBeVisible();
     }
   }
 
-  await expect(page.getByText('Too many attempts. Try again in 15 minutes.')).toBeVisible();
+  await expect(page.getByText('Account temporarily locked due to too many failed attempts')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Verify' })).toBeDisabled();
 });

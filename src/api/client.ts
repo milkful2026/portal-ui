@@ -14,21 +14,19 @@ import {
 const BASE_URL = '/v1';
 
 /** Session-expiry hook, wired up by AuthContext so the client can trigger a
- * redirect-to-login without a circular import. */
+ * redirect-to-login without a circular import. Fires on any 401
+ * (UNAUTHENTICATED) — including the case this used to special-case as a
+ * separate "ACCESS_REVOKED" 403 (a code the real backend never emits: its
+ * documented behavior is that an already-issued access token stays valid
+ * until natural JWT expiry — see MA-129 §9 / user_service.py's own
+ * docstring — so there is no immediate 403 to react to on a mid-session
+ * role change or deactivation). A 403 from a real permission check
+ * (FORBIDDEN) is handled below as an ordinary error, not a forced logout,
+ * per services/README.md §5c's 401→re-authenticate / 403→permission-denied
+ * mapping. */
 let onSessionExpired: (() => void) | null = null;
 export function setOnSessionExpired(cb: (() => void) | null) {
   onSessionExpired = cb;
-}
-
-/** §9: "Admin deactivates their own session's role ... mid-session. Next API
- * call returns 403; UI redirects to login." Distinct from an ordinary
- * permission-denied 403 (e.g. a non-SuperAdmin hitting a SuperAdmin-only
- * endpoint), which should show a toast, not force a logout. MA-129 is the
- * source of truth for the exact error code; ACCESS_REVOKED is this UI's
- * assumption pending that contract, flagged as a resolved ambiguity. */
-let onAccessRevoked: (() => void) | null = null;
-export function setOnAccessRevoked(cb: (() => void) | null) {
-  onAccessRevoked = cb;
 }
 
 let getAccessToken: () => string | null = () => null;
@@ -72,11 +70,8 @@ async function request<T>(
   }
 
   if (!response.ok) {
-    if (response.status === 403 && body?.status === 'error' && body.error.code === 'ACCESS_REVOKED') {
-      onAccessRevoked?.();
-    }
     if (body && body.status === 'error') {
-      throw new ApiError(body.error.code, body.error.message, response.status);
+      throw new ApiError(body.data.errorCode, body.data.message, response.status);
     }
     if (response.status === 403) {
       throw new ApiError('FORBIDDEN', 'Permission denied', 403);

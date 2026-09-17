@@ -20,6 +20,21 @@ describe('isValidCidr', () => {
   it('tolerates surrounding whitespace', () => {
     expect(isValidCidr('  10.0.0.0/8  ')).toBe(true);
   });
+
+  it('accepts valid IPv6 CIDR ranges (the backend validates with Python ipaddress, which is IPv6-native)', () => {
+    expect(isValidCidr('2001:db8::/32')).toBe(true);
+    expect(isValidCidr('::1/128')).toBe(true);
+    expect(isValidCidr('::/0')).toBe(true);
+    expect(isValidCidr('fe80::1/64')).toBe(true);
+    expect(isValidCidr('2001:db8:0:0:0:0:0:1/128')).toBe(true);
+    expect(isValidCidr('::ffff:192.168.1.1/128')).toBe(true);
+  });
+
+  it('rejects malformed IPv6 entries', () => {
+    expect(isValidCidr('2001:db8::')).toBe(false); // missing prefix
+    expect(isValidCidr('2001:db8::/129')).toBe(false); // prefix out of range
+    expect(isValidCidr('not-an-ipv6/64')).toBe(false);
+  });
 });
 
 describe('parseCidrList', () => {

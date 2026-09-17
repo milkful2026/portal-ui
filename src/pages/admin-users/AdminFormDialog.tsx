@@ -10,8 +10,9 @@ import Button from '@mui/material/Button';
 import Alert from '@mui/material/Alert';
 import Stack from '@mui/material/Stack';
 import { useSnackbar } from 'notistack';
-import { AdminRole, AdminUser, ApiError } from '../../api/types';
+import { AdminErrorCode, AdminRole, AdminUser, ApiError } from '../../api/types';
 import { validateCidrField, parseCidrList } from '../../utils/cidr';
+import { validateMaxSessionsField, parseMaxSessions } from '../../utils/maxSessions';
 import { requiresRoleChangeConfirmation, roleChangeConfirmationMessage } from '../../utils/roleChange';
 import { logAdminAnalyticsEvent } from '../../utils/analytics';
 import { useCreateAdminMutation, useUpdateAdminMutation } from './hooks';
@@ -41,6 +42,7 @@ export default function AdminFormDialog({ open, onClose, admin }: Props) {
 
   const [emailError, setEmailError] = useState<string | null>(null);
   const [cidrError, setCidrError] = useState<string | null>(null);
+  const [maxSessionsError, setMaxSessionsError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [pendingRoleChange, setPendingRoleChange] = useState(false);
 
@@ -54,6 +56,7 @@ export default function AdminFormDialog({ open, onClose, admin }: Props) {
     setMaxSessions('');
     setEmailError(null);
     setCidrError(null);
+    setMaxSessionsError(null);
     setFormError(null);
     onClose();
   }
@@ -66,7 +69,7 @@ export default function AdminFormDialog({ open, onClose, admin }: Props) {
         payload: {
           role,
           ipAllowlist: valid,
-          maxConcurrentSessions: maxSessions.trim() === '' ? null : Number(maxSessions),
+          maxConcurrentSessions: parseMaxSessions(maxSessions),
         },
       });
       logAdminAnalyticsEvent(
@@ -91,7 +94,9 @@ export default function AdminFormDialog({ open, onClose, admin }: Props) {
 
     const cidrValidation = validateCidrField(ipAllowlist);
     setCidrError(cidrValidation);
-    if (cidrValidation) return;
+    const maxSessionsValidation = isEdit ? validateMaxSessionsField(maxSessions) : null;
+    setMaxSessionsError(maxSessionsValidation);
+    if (cidrValidation || maxSessionsValidation) return;
 
     if (isEdit) {
       if (requiresRoleChangeConfirmation(admin!.role, role)) {
@@ -111,7 +116,7 @@ export default function AdminFormDialog({ open, onClose, admin }: Props) {
       resetAndClose();
     } catch (err) {
       if (err instanceof ApiError) {
-        if (err.code === 'DUPLICATE_EMAIL') {
+        if (err.code === AdminErrorCode.ADMIN_EMAIL_EXISTS) {
           setEmailError(err.message);
         } else {
           setFormError(err.message);
@@ -186,9 +191,15 @@ export default function AdminFormDialog({ open, onClose, admin }: Props) {
                     type="number"
                     fullWidth
                     placeholder="Unlimited"
+                    helperText={maxSessionsError ?? '0 means no sessions allowed. Leave empty for unlimited.'}
+                    error={Boolean(maxSessionsError)}
                     value={maxSessions}
-                    onChange={(e) => setMaxSessions(e.target.value)}
-                    slotProps={{ htmlInput: { min: 1 } }}
+                    onChange={(e) => {
+                      setMaxSessions(e.target.value);
+                      setMaxSessionsError(null);
+                    }}
+                    onBlur={(e) => setMaxSessionsError(validateMaxSessionsField(e.target.value))}
+                    slotProps={{ htmlInput: { min: 0 } }}
                   />
                 </>
               )}
