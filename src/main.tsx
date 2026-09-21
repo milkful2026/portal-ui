@@ -19,9 +19,16 @@ const queryClient = new QueryClient({
   },
 });
 
+// Defaults to true (unchanged behavior for anyone not opting in to the
+// real backend) — MSW mocks the MA-129 API contract for dev/test. Set
+// VITE_USE_MOCKS=false (e.g. in a .env.local, or `VITE_USE_MOCKS=false
+// npm run dev`) to instead hit a real local backend via vite.config.ts's
+// dev-server proxy — see services/local-dev/README.md for bringing that
+// up (docker compose up -d, then bootstrap_super_admin.py once).
+const useMocks = import.meta.env.VITE_USE_MOCKS !== 'false';
+
 async function enableMocking() {
-  // MSW mocks the documented MA-129 API contract for dev/test; this app
-  // never calls a live backend (see MA-128 constraints).
+  if (!useMocks) return;
   const { worker } = await import('./mocks/browser');
   return worker.start({ onUnhandledRequest: 'bypass' });
 }
