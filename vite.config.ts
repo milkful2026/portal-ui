@@ -5,16 +5,25 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   server: {
-    // Only reached when VITE_USE_MOCKS=false (see main.tsx) — proxies
-    // this app's relative /v1/... fetches to the real identity-auth
-    // service running via services/local-dev (docker compose up -d),
-    // port 8001 per that service's own run_local.py. Inert otherwise:
-    // MSW intercepts fetch before it ever reaches the network.
-    proxy: {
-      '/v1': {
-        target: 'http://localhost:8001',
-        changeOrigin: true,
-      },
-    },
+    // Gated on VITE_USE_MOCKS=false, not registered unconditionally —
+    // MSW starts with onUnhandledRequest: 'bypass' (main.tsx), so any
+    // /v1/... call MSW doesn't have a handler for falls through to the
+    // network. An always-on proxy would silently hand that fallthrough
+    // to a real backend if one happened to be running (e.g. left up
+    // from unrelated local-dev work) instead of failing loudly with a
+    // 404 the way default (mocked) mode did before this existed — that
+    // would mask gaps in MSW handler coverage rather than surface them.
+    proxy:
+      process.env.VITE_USE_MOCKS === 'false'
+        ? {
+            '/v1': {
+              // Real identity-auth service running via services/local-dev
+              // (docker compose up -d), port 8001 per that service's own
+              // run_local.py.
+              target: 'http://localhost:8001',
+              changeOrigin: true,
+            },
+          }
+        : undefined,
   },
 })
