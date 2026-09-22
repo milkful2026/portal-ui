@@ -13,7 +13,12 @@ export default defineConfig(({ mode }) => {
   // proxy below — every /v1/... request hit neither MSW nor a real
   // backend, and Vite's own dev server answered with its SPA index.html
   // fallback instead, breaking every API call silently.
-  const env = loadEnv(mode, process.cwd(), '')
+  // Only VITE_USE_MOCKS is ever read below, so this only loads
+  // VITE_-prefixed vars (Vite's own default) rather than every var in
+  // .env/.env.local — an empty-string prefix would load everything,
+  // needlessly broadening what a future edit here (e.g. spreading `env`
+  // into `define`) could accidentally expose to the client bundle.
+  const env = loadEnv(mode, process.cwd(), 'VITE_')
 
   return {
     plugins: [react()],
