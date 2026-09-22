@@ -1,4 +1,4 @@
-import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, ReactNode, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { jwtDecode } from 'jwt-decode';
 import { AdminRole } from '../api/types';
 import { setAccessTokenGetter, setOnSessionExpired } from '../api/client';
@@ -96,7 +96,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setSessionMessage(null);
   }, []);
 
-  useEffect(() => {
+  // useLayoutEffect, not useEffect: on a fresh page load, `initializing`
+  // flips to false and `accessToken` becomes non-null in the SAME
+  // commit that first unblocks RequireAuth's children — unlike the
+  // login->navigate flow, where that update and the target page's mount
+  // happen in two separate commits. React runs a commit's passive
+  // effects (useEffect) child-before-parent, so a plain useEffect here
+  // could lose the race against a deeply-nested child's own mount-time
+  // fetch (e.g. useAdminUsersQuery): the child's request would dispatch
+  // and read client.ts's still-stale (null) token getter before this
+  // effect ever ran, sending the request with no Authorization header
+  // at all. Layout effects across an entire commit all run before any
+  // passive effect in that same commit does, regardless of tree depth —
+  // switching to useLayoutEffect closes that window entirely.
+  // useLayoutEffect, not useEffect: on a fresh page load, `initializing`
+  // flips to false and `accessToken` becomes non-null in the SAME
+  // commit that first unblocks RequireAuth's children — unlike the
+  // login->navigate flow, where that update and the target page's mount
+  // happen in two separate commits. React runs a commit's passive
+  // effects (useEffect) child-before-parent, so a plain useEffect here
+  // could lose the race against a deeply-nested child's own mount-time
+  // fetch (e.g. useAdminUsersQuery): the child's request would dispatch
+  // and read client.ts's still-stale (null) token getter before this
+  // effect ever ran, sending the request with no Authorization header
+  // at all. Layout effects across an entire commit all run before any
+  // passive effect in that same commit does, regardless of tree depth —
+  // switching to useLayoutEffect closes that window entirely.
+  useLayoutEffect(() => {
     setAccessTokenGetter(() => accessToken);
   }, [accessToken]);
 
