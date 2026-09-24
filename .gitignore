@@ -1,6 +1,7 @@
 # Local secrets — never commit
 .env
 .env.local
+.env.*.local
 .claude/settings.local.json
 
 # Node (once app code lands)
