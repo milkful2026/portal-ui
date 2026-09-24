@@ -20,29 +20,39 @@ export default defineConfig(({ mode }) => {
   // into `define`) could accidentally expose to the client bundle.
   const env = loadEnv(mode, process.cwd(), 'VITE_')
 
+  // Same gate, same target, for both `vite` (dev) and `vite preview`
+  // (used by Playwright, and by anyone manually checking a production
+  // build against the real backend) — `server.proxy` and
+  // `preview.proxy` are two separate config keys in Vite; `vite preview`
+  // does not fall back to `server.proxy`. Missing this meant a
+  // VITE_USE_MOCKS=false preview run had no proxy at all: /v1/...
+  // requests hit preview's SPA fallback (200 + index.html), response
+  // .json() threw, and every caller silently got `undefined` back
+  // instead of real data or a clear error.
+  const proxy =
+    env.VITE_USE_MOCKS === 'false'
+      ? {
+          '/v1': {
+            // Real identity-auth service running via services/local-dev
+            // (docker compose up -d), port 8001 per that service's own
+            // run_local.py.
+            target: 'http://localhost:8001',
+            changeOrigin: true,
+          },
+        }
+      : undefined
+
   return {
     plugins: [react()],
-    server: {
-      // Gated on VITE_USE_MOCKS=false, not registered unconditionally —
-      // MSW starts with onUnhandledRequest: 'bypass' (main.tsx), so any
-      // /v1/... call MSW doesn't have a handler for falls through to the
-      // network. An always-on proxy would silently hand that fallthrough
-      // to a real backend if one happened to be running (e.g. left up
-      // from unrelated local-dev work) instead of failing loudly with a
-      // 404 the way default (mocked) mode did before this existed — that
-      // would mask gaps in MSW handler coverage rather than surface them.
-      proxy:
-        env.VITE_USE_MOCKS === 'false'
-          ? {
-              '/v1': {
-                // Real identity-auth service running via services/local-dev
-                // (docker compose up -d), port 8001 per that service's own
-                // run_local.py.
-                target: 'http://localhost:8001',
-                changeOrigin: true,
-              },
-            }
-          : undefined,
-    },
+    // Gated on VITE_USE_MOCKS=false, not registered unconditionally —
+    // MSW starts with onUnhandledRequest: 'bypass' (main.tsx), so any
+    // /v1/... call MSW doesn't have a handler for falls through to the
+    // network. An always-on proxy would silently hand that fallthrough
+    // to a real backend if one happened to be running (e.g. left up
+    // from unrelated local-dev work) instead of failing loudly the way
+    // default (mocked) mode did before this existed — that would mask
+    // gaps in MSW handler coverage rather than surface them.
+    server: { proxy },
+    preview: { proxy },
   }
 })
