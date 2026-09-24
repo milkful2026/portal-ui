@@ -21,6 +21,25 @@ function fail(errorCode: string, message: string, status: number) {
   );
 }
 
+/** Every /v1/admin/users* route sits behind the real admin authorizer
+ * (admin_authorizer_handler.py), which denies with 401 UNAUTHENTICATED
+ * when no Bearer token is present at all. This mock previously didn't
+ * check for one on any of these routes — a code-review verification
+ * agent caught that the resulting false-negative risk meant
+ * admin-users-refresh.spec.ts (the regression test for a real missing-
+ * Authorization-header race condition) could pass even with the race
+ * reintroduced, since the mock would return 200 either way. Returns the
+ * 401 response to send, or null if a token is present (this mock does
+ * not decode/validate it further — that's what buildMockJwt's own
+ * shape already guarantees for tokens this app itself issued). */
+function requireAuth(request: Request): Response | null {
+  const header = request.headers.get('Authorization') ?? request.headers.get('authorization');
+  if (!header || !header.toLowerCase().startsWith('bearer ') || header.slice(7).trim() === '') {
+    return fail(AdminErrorCode.UNAUTHENTICATED, 'Authentication required', 401);
+  }
+  return null;
+}
+
 // challengeToken -> { email }
 const pendingLogins = new Map<string, { email: string }>();
 // email -> { count, firstFailureAt }
@@ -121,11 +140,15 @@ export const handlers = [
     });
   }),
 
-  http.get('/v1/admin/users', () => {
+  http.get('/v1/admin/users', ({ request }) => {
+    const authError = requireAuth(request);
+    if (authError) return authError;
     return ok({ items: adminUsers, total: adminUsers.length, page: 1, pageSize: adminUsers.length });
   }),
 
   http.post('/v1/admin/users', async ({ request }) => {
+    const authError = requireAuth(request);
+    if (authError) return authError;
     const body = (await request.json()) as CreateAdminUserRequest;
     if (findByEmail(body.email)) {
       return fail(AdminErrorCode.ADMIN_EMAIL_EXISTS, 'An admin with this email already exists', 409);
@@ -149,6 +172,8 @@ export const handlers = [
   }),
 
   http.patch('/v1/admin/users/:id', async ({ request, params }) => {
+    const authError = requireAuth(request);
+    if (authError) return authError;
     const user = findById(params.id as string);
     if (!user) {
       return fail(AdminErrorCode.ADMIN_NOT_FOUND, 'Admin user not found', 404);
@@ -161,7 +186,9 @@ export const handlers = [
     return ok(user);
   }),
 
-  http.post('/v1/admin/users/:id/deactivate', ({ params }) => {
+  http.post('/v1/admin/users/:id/deactivate', ({ request, params }) => {
+    const authError = requireAuth(request);
+    if (authError) return authError;
     const user = findById(params.id as string);
     if (!user) {
       return fail(AdminErrorCode.ADMIN_NOT_FOUND, 'Admin user not found', 404);
@@ -171,7 +198,9 @@ export const handlers = [
     return ok(user);
   }),
 
-  http.post('/v1/admin/users/:id/reactivate', ({ params }) => {
+  http.post('/v1/admin/users/:id/reactivate', ({ request, params }) => {
+    const authError = requireAuth(request);
+    if (authError) return authError;
     const user = findById(params.id as string);
     if (!user) {
       return fail(AdminErrorCode.ADMIN_NOT_FOUND, 'Admin user not found', 404);
