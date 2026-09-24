@@ -3,7 +3,8 @@ import { jwtDecode } from 'jwt-decode';
 import { AdminRole } from '../api/types';
 import { setAccessTokenGetter, setOnSessionExpired } from '../api/client';
 
-const STORAGE_KEY = 'portal-ui.accessToken';
+const ACCESS_TOKEN_STORAGE_KEY = 'portal-ui.accessToken';
+const ID_TOKEN_STORAGE_KEY = 'portal-ui.idToken';
 
 interface DecodedAdminToken {
   sub: string;
@@ -25,16 +26,27 @@ interface AuthContextValue {
   initializing: boolean;
   /** Set after JWT expiry/403-role-change forces a redirect, cleared on next login attempt. */
   sessionMessage: string | null;
-  setSession: (accessToken: string) => void;
+  setSession: (accessToken: string, idToken: string) => void;
   clearSession: (message?: string) => void;
   clearSessionMessage: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-function decodeUser(token: string): AuthUser | null {
+/** Decodes the ID token specifically, never the access token — confirmed
+ * against the real backend that Cognito access tokens carry `sub` and
+ * `cognito:groups` but NOT `email` (that's an identity/profile claim,
+ * only on the ID token; access tokens are scoped to authorization only,
+ * standard OIDC separation). Using the access token here previously
+ * rendered "Welcome, undefined" — `user.email` was always undefined
+ * against the real backend, since the API-authorization token this app
+ * already needed for every request never had it. The ID token carries
+ * everything the access token does (sub, cognito:groups) plus email, so
+ * deriving the whole `AuthUser` from it exclusively is a strict
+ * superset, not a second source of truth to keep in sync. */
+function decodeUser(idToken: string): AuthUser | null {
   try {
-    const decoded = jwtDecode<DecodedAdminToken>(token);
+    const decoded = jwtDecode<DecodedAdminToken>(idToken);
     const role = decoded['cognito:groups']?.[0];
     if (!role) return null;
     if (decoded.exp * 1000 < Date.now()) return null;
@@ -45,54 +57,64 @@ function decodeUser(token: string): AuthUser | null {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  // accessToken: attached to every API call's Authorization header,
+  // never decoded for display — it's an opaque authorization credential
+  // as far as this app's own UI is concerned.
   const [accessToken, setAccessToken] = useState<string | null>(null);
+  // idToken: never sent to the API — decoded locally, below, purely to
+  // derive `user` for display/role-gating purposes.
+  const [idToken, setIdToken] = useState<string | null>(null);
   const [initializing, setInitializing] = useState(true);
   const [sessionMessage, setSessionMessage] = useState<string | null>(null);
 
-  // Derived, not separate state: `user` is always exactly
-  // `decodeUser(accessToken)`. Previously these were two independent
-  // `useState`s kept in sync by hand across 3 call sites (init effect,
-  // setSession, clearSession) — a future 4th place that updates
-  // accessToken (e.g. a silent-refresh handler) could easily forget to
-  // also update `user`, leaving the UI showing a stale identity while
-  // the token itself had changed. Deriving removes that failure mode
-  // entirely rather than relying on remembering to keep them in sync.
-  const user = useMemo<AuthUser | null>(() => (accessToken ? decodeUser(accessToken) : null), [accessToken]);
+  // Derived, not separate state — see decodeUser's own docstring for why
+  // this reads idToken, not accessToken. Also avoids the original
+  // failure mode this pattern was chosen for: a future 4th place that
+  // updates the tokens (e.g. a silent-refresh handler) can't forget to
+  // separately update `user`, since there's nothing separate to update.
+  const user = useMemo<AuthUser | null>(() => (idToken ? decodeUser(idToken) : null), [idToken]);
 
   useEffect(() => {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) {
-      if (decodeUser(stored)) {
-        setAccessToken(stored);
-      } else {
-        localStorage.removeItem(STORAGE_KEY);
-      }
+    const storedAccessToken = localStorage.getItem(ACCESS_TOKEN_STORAGE_KEY);
+    const storedIdToken = localStorage.getItem(ID_TOKEN_STORAGE_KEY);
+    if (storedAccessToken && storedIdToken && decodeUser(storedIdToken)) {
+      setAccessToken(storedAccessToken);
+      setIdToken(storedIdToken);
+    } else {
+      localStorage.removeItem(ACCESS_TOKEN_STORAGE_KEY);
+      localStorage.removeItem(ID_TOKEN_STORAGE_KEY);
     }
     setInitializing(false);
   }, []);
 
   const clearSession = useCallback((message?: string) => {
-    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(ACCESS_TOKEN_STORAGE_KEY);
+    localStorage.removeItem(ID_TOKEN_STORAGE_KEY);
     setAccessToken(null);
+    setIdToken(null);
     if (message) setSessionMessage(message);
   }, []);
 
-  const setSession = useCallback((token: string) => {
-    if (!decodeUser(token)) {
-      // A token that doesn't decode to a usable AuthUser (malformed,
+  const setSession = useCallback((newAccessToken: string, newIdToken: string) => {
+    if (!decodeUser(newIdToken)) {
+      // An ID token that doesn't decode to a usable AuthUser (malformed,
       // missing/empty `cognito:groups` role claim, or already expired)
-      // must not be persisted — storing it anyway would leave
-      // `accessToken` truthy while the derived `user` above is null:
-      // RequireAuth bounces to /login, but the unusable token would
-      // remain in localStorage and keep getting attached as
-      // `Authorization: Bearer …` on every subsequent request.
-      localStorage.removeItem(STORAGE_KEY);
+      // must not be persisted — storing it anyway would leave both
+      // tokens set while the derived `user` above is null: RequireAuth
+      // bounces to /login, but the unusable tokens would remain in
+      // localStorage and keep getting attached/decoded on every
+      // subsequent request/render.
+      localStorage.removeItem(ACCESS_TOKEN_STORAGE_KEY);
+      localStorage.removeItem(ID_TOKEN_STORAGE_KEY);
       setAccessToken(null);
+      setIdToken(null);
       setSessionMessage('Something went wrong signing you in. Please try again.');
       return;
     }
-    localStorage.setItem(STORAGE_KEY, token);
-    setAccessToken(token);
+    localStorage.setItem(ACCESS_TOKEN_STORAGE_KEY, newAccessToken);
+    localStorage.setItem(ID_TOKEN_STORAGE_KEY, newIdToken);
+    setAccessToken(newAccessToken);
+    setIdToken(newIdToken);
     setSessionMessage(null);
   }, []);
 

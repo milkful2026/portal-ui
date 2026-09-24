@@ -45,7 +45,7 @@ export default function TwoFactorPage() {
     setSubmitting(true);
     try {
       const data = await authApi.verify2fa({ challengeToken: challengeToken!, code });
-      setSession(data.accessToken);
+      setSession(data.accessToken, data.idToken);
       navigate(from, { replace: true });
     } catch (err) {
       if (err instanceof ApiError) {
