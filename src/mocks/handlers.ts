@@ -131,7 +131,8 @@ export const handlers = [
     failedAttempts.delete(pending.email);
     pendingLogins.delete(body.challengeToken);
     user.lastLoginAt = new Date().toISOString();
-    const accessToken = buildMockJwt({ sub: user.id, email: user.email, role: user.role });
+    // email omitted here deliberately — see buildMockJwt's own docstring.
+    const accessToken = buildMockJwt({ sub: user.id, role: user.role });
     return ok({
       accessToken,
       refreshToken: crypto.randomUUID(),
