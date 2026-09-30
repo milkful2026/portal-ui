@@ -12,6 +12,7 @@ import {
   nextId,
 } from './db';
 import { buildMockJwt } from './jwt';
+import { resolveCustomerTransition } from '../utils/customerTransitions';
 import {
   AdminErrorCode,
   AdminRole,
@@ -97,24 +98,24 @@ function requireCustomerRole(request: Request): Response | null {
   return null;
 }
 
-/** FR-4's three-state machine, enforced server-side (mirrors what the real
- * MA-139 backend must also enforce — see spec §6's workflow, which
- * explicitly expects a 409 INVALID_STATUS_TRANSITION as a defensive case
- * even though the state-aware UI menu shouldn't normally reach it).
- * Returns an error message, or null if the transition is valid. */
-function invalidTransitionReason(action: BulkCustomerAction, current: CustomerStatus): string | null {
-  if (action === 'suspend' && current !== 'Active') {
-    return `Cannot suspend an account that is already ${current}.`;
-  }
-  if (action === 'deactivate' && current === 'Deactivated') {
-    return 'This account is already Deactivated.';
-  }
-  if (action === 'reactivate' && current === 'Active') {
-    return 'This account is already Active.';
-  }
-  return null;
+const VALID_BULK_ACTIONS: BulkCustomerAction[] = ['suspend', 'deactivate', 'reactivate'];
+
+/** `body.action` comes straight off the wire (`as BulkCustomerStatusRequest`
+ * is a compile-time-only assertion, not a runtime guarantee) — an
+ * unrecognized value must be rejected explicitly rather than falling
+ * through applyCustomerTransition's newStatus ternary to a default
+ * behavior (previously: silently reactivating the account). */
+function isValidBulkAction(action: unknown): action is BulkCustomerAction {
+  return typeof action === 'string' && (VALID_BULK_ACTIONS as string[]).includes(action);
 }
 
+/** Applies an already-validated ('apply' outcome) status transition:
+ * mutates the customer record and appends exactly one history row. Callers
+ * must consult resolveCustomerTransition (customerTransitions.ts) first —
+ * an 'error' outcome must be rejected with a 409 before reaching here, and
+ * a 'noop' outcome must skip this function entirely (MA-139 FR-4's
+ * idempotent-deactivate and the mirrored idempotent-reactivate-on-Active
+ * case both require no duplicate history row on the no-op path, §9). */
 function applyCustomerTransition(
   customer: CustomerAccount,
   action: BulkCustomerAction,
@@ -339,9 +340,13 @@ export const handlers = [
     if (!body.reason?.trim() || !body.until) {
       return fail(CustomerErrorCode.VALIDATION_ERROR, 'Reason and an end date are required to suspend an account', 400);
     }
-    const invalidReason = invalidTransitionReason('suspend', customer.status);
-    if (invalidReason) {
-      return fail(CustomerErrorCode.INVALID_STATUS_TRANSITION, invalidReason, 409);
+    // FR-3/§9: suspending an already-Suspended account is a real update
+    // (until/reason change, new history row) — not idempotent-as-a-no-op.
+    // Only suspending an already-Deactivated account is rejected (409):
+    // must reactivate first.
+    const transition = resolveCustomerTransition('suspend', customer.status);
+    if (transition.kind === 'error') {
+      return fail(CustomerErrorCode.INVALID_STATUS_TRANSITION, transition.message, 409);
     }
     const decoded = decodeMockJwt(request);
     const updated = applyCustomerTransition(customer, 'suspend', body.reason.trim(), body.until, decoded?.sub ?? 'admin-1');
@@ -359,12 +364,15 @@ export const handlers = [
     if (!body.reason?.trim()) {
       return fail(CustomerErrorCode.VALIDATION_ERROR, 'Reason is required to deactivate an account', 400);
     }
-    const invalidReason = invalidTransitionReason('deactivate', customer.status);
-    if (invalidReason) {
-      return fail(CustomerErrorCode.INVALID_STATUS_TRANSITION, invalidReason, 409);
-    }
+    // FR-4: deactivate is idempotent — an already-Deactivated account
+    // returns 200 with the unchanged account (no duplicate history row,
+    // no error). This endpoint never returns 409 (spec §6 workflow).
     const decoded = decodeMockJwt(request);
-    const updated = applyCustomerTransition(customer, 'deactivate', body.reason.trim(), null, decoded?.sub ?? 'admin-1');
+    const transition = resolveCustomerTransition('deactivate', customer.status);
+    const updated =
+      transition.kind === 'noop'
+        ? customer
+        : applyCustomerTransition(customer, 'deactivate', body.reason.trim(), null, decoded?.sub ?? 'admin-1');
     return ok(updated);
   }),
 
@@ -376,18 +384,21 @@ export const handlers = [
       return fail(CustomerErrorCode.CUSTOMER_NOT_FOUND, 'Customer account not found', 404);
     }
     const body = (await request.json().catch(() => ({}))) as ReactivateCustomerRequest;
-    const invalidReason = invalidTransitionReason('reactivate', customer.status);
-    if (invalidReason) {
-      return fail(CustomerErrorCode.INVALID_STATUS_TRANSITION, invalidReason, 409);
-    }
+    // FR-5: reactivate has no 409 case at all. Reactivating an
+    // already-Active account is idempotent (200, unchanged, no duplicate
+    // history row); Suspended/Deactivated both apply normally.
     const decoded = decodeMockJwt(request);
-    const updated = applyCustomerTransition(
-      customer,
-      'reactivate',
-      body.reason?.trim() || null,
-      null,
-      decoded?.sub ?? 'admin-1',
-    );
+    const transition = resolveCustomerTransition('reactivate', customer.status);
+    const updated =
+      transition.kind === 'noop'
+        ? customer
+        : applyCustomerTransition(
+            customer,
+            'reactivate',
+            body.reason?.trim() || null,
+            null,
+            decoded?.sub ?? 'admin-1',
+          );
     return ok(updated);
   }),
 
@@ -396,6 +407,10 @@ export const handlers = [
     if (authError) return authError;
     const body = (await request.json()) as BulkCustomerStatusRequest;
     const decoded = decodeMockJwt(request);
+
+    if (!isValidBulkAction(body.action)) {
+      return fail(CustomerErrorCode.VALIDATION_ERROR, `Unsupported bulk action: ${String(body.action)}`, 400);
+    }
 
     if (body.action === 'suspend' && (!body.reason?.trim() || !body.until)) {
       return fail(CustomerErrorCode.VALIDATION_ERROR, 'Reason and an end date are required to suspend an account', 400);
@@ -406,7 +421,9 @@ export const handlers = [
 
     // §9 "Network failure mid-bulk-action": the UI only ever learns what the
     // server actually completed via this per-row array — nothing here is an
-    // optimistic guess, each row is independently validated and applied.
+    // optimistic guess, each row is independently validated and applied
+    // against the same state machine as the single-account endpoints above
+    // (resolveCustomerTransition), so bulk and single behavior never drift.
     const results: BulkCustomerStatusResultItem[] = body.customerIds.map((customerId) => {
       const customer = findCustomerById(customerId);
       if (!customer) {
@@ -417,22 +434,27 @@ export const handlers = [
           message: 'Customer account no longer exists.',
         };
       }
-      const invalidReason = invalidTransitionReason(body.action, customer.status);
-      if (invalidReason) {
+      const transition = resolveCustomerTransition(body.action, customer.status);
+      if (transition.kind === 'error') {
         return {
           customerId,
           success: false,
           errorCode: CustomerErrorCode.INVALID_STATUS_TRANSITION,
-          message: invalidReason,
+          message: transition.message,
         };
       }
-      applyCustomerTransition(
-        customer,
-        body.action,
-        body.reason?.trim() || null,
-        body.until ?? null,
-        decoded?.sub ?? 'admin-1',
-      );
+      if (transition.kind === 'apply') {
+        applyCustomerTransition(
+          customer,
+          body.action,
+          body.reason?.trim() || null,
+          body.until ?? null,
+          decoded?.sub ?? 'admin-1',
+        );
+      }
+      // transition.kind === 'noop': idempotent success, no mutation, no
+      // duplicate history row — still reported as success: true, since
+      // nothing about the request failed.
       return { customerId, success: true, errorCode: null };
     });
 
