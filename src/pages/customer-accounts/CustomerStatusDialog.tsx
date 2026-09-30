@@ -72,7 +72,6 @@ export default function CustomerStatusDialog({ open, action, customer, onClose }
       setUntilError(null);
       setFormError(null);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, customer?.id, action]);
 
   if (!customer || !action) return null;
