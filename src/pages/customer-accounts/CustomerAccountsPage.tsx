@@ -25,7 +25,7 @@ import Link from '@mui/material/Link';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
 import FilterListIcon from '@mui/icons-material/FilterList';
-import { CustomerAccount, CustomerStatus } from '../../api/types';
+import { BulkCustomerStatusResultItem, CustomerAccount, CustomerStatus } from '../../api/types';
 import { useCustomerAccountsQuery } from './hooks';
 import CustomerStatusBadge from './CustomerStatusBadge';
 import CustomerStatusDialog, { CustomerStatusDialogAction } from './CustomerStatusDialog';
@@ -138,9 +138,24 @@ export default function CustomerAccountsPage() {
     closeMenu();
   }
 
-  function closeBulkDialog() {
+  // Dialog dismissed (Cancel/backdrop/Esc) before any request was sent -
+  // the admin's selection is left untouched so they don't have to redo it.
+  function dismissBulkDialog() {
     setBulkAction(null);
-    setSelected(new Set());
+  }
+
+  // The bulk action actually completed (fully or partially). Clear the
+  // selection only for rows that succeeded; rows that failed stay selected
+  // so the admin can retry just those without re-picking them from scratch.
+  function completeBulkDialog(results: BulkCustomerStatusResultItem[]) {
+    setBulkAction(null);
+    setSelected((prev) => {
+      const next = new Set(prev);
+      results.forEach((r) => {
+        if (r.success) next.delete(r.customerId);
+      });
+      return next;
+    });
   }
 
   const filterControls = (
@@ -377,7 +392,8 @@ export default function CustomerAccountsPage() {
         open={Boolean(bulkAction)}
         action={bulkAction}
         customers={selectedCustomers}
-        onClose={closeBulkDialog}
+        onDismiss={dismissBulkDialog}
+        onComplete={completeBulkDialog}
       />
     </Box>
   );

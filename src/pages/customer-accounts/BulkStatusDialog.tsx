@@ -26,7 +26,15 @@ interface Props {
   open: boolean;
   action: CustomerStatusDialogAction | null;
   customers: CustomerAccount[];
-  onClose: () => void;
+  /** Dialog dismissed (Cancel, backdrop, Esc) before any request was sent —
+   * the admin's row selection must be preserved so they don't have to
+   * redo it (finding: canceling used to wipe the whole selection). */
+  onDismiss: () => void;
+  /** The bulk action actually completed (fully or partially) and the admin
+   * closed the result summary — called with the server's per-row results
+   * so the caller can decide what to do with the selection (e.g. clear
+   * only the rows that succeeded). */
+  onComplete: (results: BulkCustomerStatusResultItem[]) => void;
 }
 
 const TITLES: Record<CustomerStatusDialogAction, string> = {
@@ -49,7 +57,7 @@ const CONFIRM_LABELS: Record<CustomerStatusDialogAction, string> = {
  * instead of closing, so the per-row outcome is never silently collapsed
  * into a bare "some failed" — spec §4/§9's explicit requirement.
  */
-export default function BulkStatusDialog({ open, action, customers, onClose }: Props) {
+export default function BulkStatusDialog({ open, action, customers, onDismiss, onComplete }: Props) {
   const { enqueueSnackbar } = useSnackbar();
   const bulkMutation = useBulkCustomerStatusMutation();
 
@@ -115,8 +123,18 @@ export default function BulkStatusDialog({ open, action, customers, onClose }: P
     }
   }
 
-  function handleClose() {
-    onClose();
+  // Dismiss without having submitted anything yet (Cancel / backdrop / Esc
+  // on the form view) — nothing happened server-side, so the selection is
+  // left untouched.
+  function handleDismiss() {
+    onDismiss();
+  }
+
+  // The bulk action actually ran and the admin is done looking at the
+  // result summary (Close button, or backdrop/Esc on the result view) —
+  // hand the results back up so the caller can update the selection.
+  function handleCloseResults() {
+    if (results) onComplete(results);
   }
 
   if (results) {
@@ -124,7 +142,7 @@ export default function BulkStatusDialog({ open, action, customers, onClose }: P
     const failedResults = results.filter((r) => !r.success);
 
     return (
-      <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
+      <Dialog open={open} onClose={handleCloseResults} maxWidth="sm" fullWidth>
         <DialogTitle>Result</DialogTitle>
         <DialogContent>
           <Typography variant="subtitle1" sx={{ mb: 2 }}>
@@ -158,7 +176,7 @@ export default function BulkStatusDialog({ open, action, customers, onClose }: P
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleClose} variant="contained" autoFocus>
+          <Button onClick={handleCloseResults} variant="contained" autoFocus>
             Close
           </Button>
         </DialogActions>
@@ -167,7 +185,7 @@ export default function BulkStatusDialog({ open, action, customers, onClose }: P
   }
 
   return (
-    <Dialog open={open} onClose={submitting ? undefined : handleClose} maxWidth="xs" fullWidth>
+    <Dialog open={open} onClose={submitting ? undefined : handleDismiss} maxWidth="xs" fullWidth>
       <DialogTitle>{TITLES[action]}</DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ mt: 1 }}>
@@ -244,7 +262,7 @@ export default function BulkStatusDialog({ open, action, customers, onClose }: P
         </Stack>
       </DialogContent>
       <DialogActions>
-        <Button onClick={handleClose} disabled={submitting}>
+        <Button onClick={handleDismiss} disabled={submitting}>
           Cancel
         </Button>
         <Button
