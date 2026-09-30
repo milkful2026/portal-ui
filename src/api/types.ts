@@ -129,3 +129,105 @@ export class ApiError extends Error {
     this.httpStatus = httpStatus;
   }
 }
+
+/**
+ * Types for the MA-141 Customer Account Management admin API contract.
+ *
+ * Authoritative source is MA-139 (User Service) — see
+ * specs/portal-ui/tasks/MA/MA-39/MA-141.md §7/§8: "this spec's DTOs must be
+ * kept in sync with it during implementation." Modeled directly on that
+ * spec's §7 JSON, following this file's existing naming convention
+ * (AdminUser/ListAdminUsersResponseData, etc.) rather than inventing a new
+ * one.
+ */
+
+export type CustomerAccountType = 'B2C' | 'B2B';
+
+export type CustomerStatus = 'Active' | 'Suspended' | 'Deactivated';
+
+export interface CustomerAccount {
+  id: string;
+  name: string;
+  mobile: string;
+  email: string | null;
+  accountType: CustomerAccountType;
+  status: CustomerStatus;
+  statusReason: string | null;
+  lastStatusChangeAt: string | null;
+}
+
+export interface CustomerStatusHistoryEntry {
+  previousStatus: CustomerStatus | null;
+  newStatus: CustomerStatus;
+  reason: string | null;
+  effectiveFrom: string | null;
+  actorAdminId: string;
+  createdAt: string;
+}
+
+export interface CustomerAccountDetail extends CustomerAccount {
+  history: CustomerStatusHistoryEntry[];
+}
+
+// ---- GET /v1/admin/customers ----
+export interface ListCustomerAccountsResponseData {
+  items: CustomerAccount[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+// ---- POST /v1/admin/customers/{id}/suspend ----
+export interface SuspendCustomerRequest {
+  reason: string;
+  /** ISO-8601 date; must be a future date (FR-4, validated client-side
+   * before submit — final validation authority is still the backend). */
+  until: string;
+}
+
+// ---- POST /v1/admin/customers/{id}/deactivate ----
+export interface DeactivateCustomerRequest {
+  reason: string;
+}
+
+// ---- POST /v1/admin/customers/{id}/reactivate ----
+export interface ReactivateCustomerRequest {
+  reason?: string;
+}
+
+export type BulkCustomerAction = 'suspend' | 'deactivate' | 'reactivate';
+
+// ---- POST /v1/admin/customers/bulk-status ----
+export interface BulkCustomerStatusRequest {
+  customerIds: string[];
+  action: BulkCustomerAction;
+  reason?: string;
+  until?: string;
+}
+
+export interface BulkCustomerStatusResultItem {
+  customerId: string;
+  success: boolean;
+  errorCode: string | null;
+  /** Not in MA-139 §7's minimal sketch, but FR-5 requires "the failed rows
+   * and their reasons listed" — a human-readable per-row message is the
+   * natural extension of the errorCode already there. Falls back to a
+   * client-side errorCode->message mapping (see utils/customerErrors.ts)
+   * when absent, so the UI never has to show a bare error code. */
+  message?: string | null;
+}
+
+export interface BulkCustomerStatusResponseData {
+  results: BulkCustomerStatusResultItem[];
+}
+
+/** Error-code taxonomy for the MA-139 customer-management endpoints —
+ * distinct from AdminErrorCode (MA-129 admin-staff endpoints), since these
+ * are two different backend services/contracts. */
+export const CustomerErrorCode = {
+  VALIDATION_ERROR: 'VALIDATION_ERROR',
+  CUSTOMER_NOT_FOUND: 'CUSTOMER_NOT_FOUND',
+  INVALID_STATUS_TRANSITION: 'INVALID_STATUS_TRANSITION',
+  FORBIDDEN: 'FORBIDDEN',
+  UNAUTHENTICATED: 'UNAUTHENTICATED',
+} as const;
