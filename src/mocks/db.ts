@@ -1,4 +1,4 @@
-import { AdminUser } from '../api/types';
+import { AdminUser, CustomerAccount, CustomerStatusHistoryEntry } from '../api/types';
 
 export const MOCK_PASSWORD = 'Passw0rd!';
 export const MOCK_TOTP_CODE = '123456';
@@ -90,4 +90,145 @@ export function findById(id: string): AdminUser | undefined {
 let idCounter = adminUsers.length + 1;
 export function nextId(): string {
   return `admin-${idCounter++}`;
+}
+
+/**
+ * In-memory customer-account directory for MSW (MA-141 §12). Reset on page
+ * reload — dev/test mock only, same constraint as adminUsers above. Seeded
+ * with a realistic mix of Active/Suspended/Deactivated and B2C/B2B so the
+ * list, detail history, and state-aware action menu are all demoable
+ * without any manual setup.
+ */
+export const customerAccounts: CustomerAccount[] = [
+  {
+    id: 'customer-1',
+    name: 'Priya Sharma',
+    mobile: '+91-98765-43210',
+    email: 'priya.sharma@example.com',
+    accountType: 'B2C',
+    status: 'Active',
+    statusReason: null,
+    lastStatusChangeAt: null,
+  },
+  {
+    id: 'customer-2',
+    name: 'Rohan Enterprises',
+    mobile: '+91-98220-11223',
+    email: 'accounts@rohanenterprises.example',
+    accountType: 'B2B',
+    status: 'Active',
+    statusReason: null,
+    lastStatusChangeAt: null,
+  },
+  {
+    id: 'customer-3',
+    name: 'Ananya Iyer',
+    mobile: '+91-99870-11234',
+    email: 'ananya.iyer@example.com',
+    accountType: 'B2C',
+    status: 'Suspended',
+    statusReason: 'Repeated failed payment attempts',
+    lastStatusChangeAt: '2026-09-20T10:15:00.000Z',
+  },
+  {
+    id: 'customer-4',
+    name: 'Karthik Traders',
+    mobile: '+91-90000-22334',
+    email: 'ops@karthiktraders.example',
+    accountType: 'B2B',
+    status: 'Suspended',
+    statusReason: 'KYC re-verification pending',
+    lastStatusChangeAt: '2026-09-22T14:30:00.000Z',
+  },
+  {
+    id: 'customer-5',
+    name: 'Meera Nair',
+    mobile: '+91-98765-00011',
+    email: 'meera.nair@example.com',
+    accountType: 'B2C',
+    status: 'Deactivated',
+    statusReason: 'Customer requested account closure',
+    lastStatusChangeAt: '2026-09-10T09:00:00.000Z',
+  },
+  {
+    id: 'customer-6',
+    name: 'Suresh Babu',
+    mobile: '+91-99900-88771',
+    email: 'suresh.babu@example.com',
+    accountType: 'B2C',
+    status: 'Deactivated',
+    statusReason: 'Fraud investigation',
+    lastStatusChangeAt: '2026-09-25T11:45:00.000Z',
+  },
+];
+
+/** Keyed by customer id, each entry's array stored newest-first (already
+ * reverse-chronological, per FR-3) so appendCustomerHistory below only
+ * ever needs to unshift. */
+export const customerStatusHistory: Record<string, CustomerStatusHistoryEntry[]> = {
+  'customer-3': [
+    {
+      previousStatus: 'Active',
+      newStatus: 'Suspended',
+      reason: 'Repeated failed payment attempts',
+      effectiveFrom: '2026-10-20',
+      actorAdminId: 'admin-2',
+      createdAt: '2026-09-20T10:15:00.000Z',
+    },
+  ],
+  'customer-4': [
+    {
+      previousStatus: 'Active',
+      newStatus: 'Suspended',
+      reason: 'KYC re-verification pending',
+      effectiveFrom: '2026-10-10',
+      actorAdminId: 'admin-1',
+      createdAt: '2026-09-22T14:30:00.000Z',
+    },
+  ],
+  'customer-5': [
+    {
+      previousStatus: 'Active',
+      newStatus: 'Deactivated',
+      reason: 'Customer requested account closure',
+      effectiveFrom: null,
+      actorAdminId: 'admin-2',
+      createdAt: '2026-09-10T09:00:00.000Z',
+    },
+  ],
+  'customer-6': [
+    {
+      previousStatus: 'Suspended',
+      newStatus: 'Deactivated',
+      reason: 'Fraud investigation',
+      effectiveFrom: null,
+      actorAdminId: 'admin-1',
+      createdAt: '2026-09-25T11:45:00.000Z',
+    },
+    {
+      previousStatus: 'Active',
+      newStatus: 'Suspended',
+      reason: 'Suspicious transaction pattern flagged',
+      effectiveFrom: '2026-09-30',
+      actorAdminId: 'admin-1',
+      createdAt: '2026-09-18T08:20:00.000Z',
+    },
+  ],
+};
+
+export function findCustomerById(id: string): CustomerAccount | undefined {
+  return customerAccounts.find((c) => c.id === id);
+}
+
+export function getCustomerHistory(id: string): CustomerStatusHistoryEntry[] {
+  return customerStatusHistory[id] ?? [];
+}
+
+export function appendCustomerHistory(id: string, entry: CustomerStatusHistoryEntry) {
+  customerStatusHistory[id] = [entry, ...(customerStatusHistory[id] ?? [])];
+}
+
+let customerIdCounter = customerAccounts.length + 1;
+export function nextCustomerId(): string {
+  return `customer-${customerIdCounter++}`;
 }

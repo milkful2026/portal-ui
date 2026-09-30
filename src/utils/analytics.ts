@@ -14,7 +14,11 @@ export type AdminAnalyticsAction =
   | 'admin_user.role_changed'
   | 'admin_user.deactivated'
   | 'admin_user.reactivated'
-  | 'admin_user.session_ip_updated';
+  | 'admin_user.session_ip_updated'
+  | 'customer_account.suspended'
+  | 'customer_account.deactivated'
+  | 'customer_account.reactivated'
+  | 'customer_account.bulk_status_changed';
 
 export interface AdminAnalyticsEvent {
   action: AdminAnalyticsAction;
