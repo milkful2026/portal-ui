@@ -22,7 +22,7 @@ test('Bulk deactivate reports partial failure clearly', async ({ page }) => {
   await dialog.getByLabel('Reason').fill('Quarterly account review cleanup');
   await dialog.getByRole('button', { name: 'Deactivate' }).click();
 
-  await expect(page.getByText('2 succeeded, 1 failed')).toBeVisible();
-  await expect(page.getByText('Meera Nair')).toBeVisible();
-  await expect(page.getByText('This account is already Deactivated.')).toBeVisible();
+  await expect(dialog.getByText('2 succeeded, 1 failed')).toBeVisible();
+  await expect(dialog.getByText('Meera Nair')).toBeVisible();
+  await expect(dialog.getByText('This account is already Deactivated.')).toBeVisible();
 });
