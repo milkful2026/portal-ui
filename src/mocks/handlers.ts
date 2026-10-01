@@ -326,7 +326,7 @@ export const handlers = [
     if (!customer) {
       return fail(CustomerErrorCode.CUSTOMER_NOT_FOUND, 'Customer account not found', 404);
     }
-    return ok({ ...customer, history: getCustomerHistory(customer.id) });
+    return ok({ ...customer, statusHistory: getCustomerHistory(customer.id) });
   }),
 
   http.post('/v1/admin/customers/:id/suspend', async ({ request, params }) => {
