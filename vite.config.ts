@@ -32,6 +32,21 @@ export default defineConfig(({ mode }) => {
   const proxy =
     env.VITE_USE_MOCKS === 'false'
       ? {
+          // More specific path first — http-proxy-middleware (which this
+          // config key maps to) matches contexts in insertion order and
+          // uses the first match, so '/v1/admin/customers' must precede
+          // the blanket '/v1' rule below or every request would hit
+          // identity-auth instead. MA-39's Customer Accounts feature
+          // (list/detail/suspend/deactivate/reactivate/bulk-status) is
+          // owned by User Service, not Identity & Auth — a different
+          // real backend process, port 8002 per that service's own
+          // run_local.py — unlike every other /v1/admin/* route (admin
+          // auth, admin *staff* user management), which Identity & Auth
+          // itself owns.
+          '/v1/admin/customers': {
+            target: 'http://localhost:8002',
+            changeOrigin: true,
+          },
           '/v1': {
             // Real identity-auth service running via services/local-dev
             // (docker compose up -d), port 8001 per that service's own
