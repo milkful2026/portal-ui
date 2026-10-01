@@ -115,7 +115,7 @@ export default function CustomerDetailPage() {
             Status History
           </Typography>
 
-          {customer.history.length === 0 ? (
+          {customer.statusHistory.length === 0 ? (
             <Alert severity="info">No status changes recorded yet.</Alert>
           ) : (
             <TableContainer component={Paper} sx={{ overflowX: 'auto' }}>
@@ -131,7 +131,7 @@ export default function CustomerDetailPage() {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {[...customer.history]
+                  {[...customer.statusHistory]
                     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
                     .map((entry, idx) => (
                       // No stable id on a history entry per the MA-139 DTO (§7) —

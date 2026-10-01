@@ -166,7 +166,13 @@ export interface CustomerStatusHistoryEntry {
 }
 
 export interface CustomerAccountDetail extends CustomerAccount {
-  history: CustomerStatusHistoryEntry[];
+  // Field name confirmed against the real User Service response, not the
+  // MA-139 spec's own §7 example (which calls it `history`) — the shipped
+  // backend implementation uses `statusHistory`. Renamed here to match
+  // reality rather than the spec text, since the backend is the harder
+  // side to change at this point and the two were never cross-checked
+  // live during parallel implementation.
+  statusHistory: CustomerStatusHistoryEntry[];
 }
 
 // ---- GET /v1/admin/customers ----
