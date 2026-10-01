@@ -2,6 +2,7 @@ import { Page, expect } from '@playwright/test';
 
 export const SUPER_ADMIN = { email: 'superadmin@milkful.test', password: 'Passw0rd!' };
 export const OPS_ADMIN = { email: 'ops@milkful.test', password: 'Passw0rd!' };
+export const FINANCE_ADMIN = { email: 'finance@milkful.test', password: 'Passw0rd!' };
 export const MOCK_TOTP_CODE = '123456';
 
 export async function loginAs(page: Page, creds: { email: string; password: string }, code = MOCK_TOTP_CODE) {

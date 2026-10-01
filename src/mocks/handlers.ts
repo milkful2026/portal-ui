@@ -1,11 +1,33 @@
 import { http, HttpResponse } from 'msw';
-import { adminUsers, findByEmail, findById, MOCK_PASSWORD, MOCK_TOTP_CODE, nextId } from './db';
+import {
+  adminUsers,
+  appendCustomerHistory,
+  customerAccounts,
+  findByEmail,
+  findById,
+  findCustomerById,
+  getCustomerHistory,
+  MOCK_PASSWORD,
+  MOCK_TOTP_CODE,
+  nextId,
+} from './db';
 import { buildMockJwt } from './jwt';
+import { resolveCustomerTransition } from '../utils/customerTransitions';
 import {
   AdminErrorCode,
+  AdminRole,
   AdminUser,
+  BulkCustomerAction,
+  BulkCustomerStatusRequest,
+  BulkCustomerStatusResultItem,
   CreateAdminUserRequest,
+  CustomerAccount,
+  CustomerErrorCode,
+  CustomerStatus,
+  DeactivateCustomerRequest,
   LoginRequest,
+  ReactivateCustomerRequest,
+  SuspendCustomerRequest,
   TwoFactorVerifyRequest,
   UpdateAdminUserRequest,
 } from '../api/types';
@@ -38,6 +60,84 @@ function requireAuth(request: Request): Response | null {
     return fail(AdminErrorCode.UNAUTHENTICATED, 'Authentication required', 401);
   }
   return null;
+}
+
+/** Decodes the sub/role claims out of this mock's own unsigned JWT
+ * (buildMockJwt's shape — header.payload.signature, base64url,
+ * `cognito:groups[0]` is the role). Not a real JWT verifier; only ever fed
+ * tokens this app itself issued, same trust boundary as requireAuth above. */
+function decodeMockJwt(request: Request): { sub: string; role: AdminRole } | null {
+  const header = request.headers.get('Authorization') ?? request.headers.get('authorization');
+  if (!header) return null;
+  const token = header.replace(/^Bearer\s+/i, '').trim();
+  const payloadSegment = token.split('.')[1];
+  if (!payloadSegment) return null;
+  try {
+    const base64 = payloadSegment.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
+    const payload = JSON.parse(atob(padded)) as { sub?: string; 'cognito:groups'?: AdminRole[] };
+    const role = payload['cognito:groups']?.[0];
+    if (!payload.sub || !role) return null;
+    return { sub: payload.sub, role };
+  } catch {
+    return null;
+  }
+}
+
+/** Customer-account endpoints require a valid Bearer token AND the FR-1
+ * role gate (Ops + SuperAdmin) — per spec §5 "enforced server-side (client-
+ * side hiding is UX only, never the authorization boundary)". Mirrors
+ * requireAuth's "return the response to send, or null" shape. */
+function requireCustomerRole(request: Request): Response | null {
+  const authError = requireAuth(request);
+  if (authError) return authError;
+  const decoded = decodeMockJwt(request);
+  if (!decoded || !(['Ops', 'SuperAdmin'] as AdminRole[]).includes(decoded.role)) {
+    return fail(CustomerErrorCode.FORBIDDEN, 'Permission denied', 403);
+  }
+  return null;
+}
+
+const VALID_BULK_ACTIONS: BulkCustomerAction[] = ['suspend', 'deactivate', 'reactivate'];
+
+/** `body.action` comes straight off the wire (`as BulkCustomerStatusRequest`
+ * is a compile-time-only assertion, not a runtime guarantee) — an
+ * unrecognized value must be rejected explicitly rather than falling
+ * through applyCustomerTransition's newStatus ternary to a default
+ * behavior (previously: silently reactivating the account). */
+function isValidBulkAction(action: unknown): action is BulkCustomerAction {
+  return typeof action === 'string' && (VALID_BULK_ACTIONS as string[]).includes(action);
+}
+
+/** Applies an already-validated ('apply' outcome) status transition:
+ * mutates the customer record and appends exactly one history row. Callers
+ * must consult resolveCustomerTransition (customerTransitions.ts) first —
+ * an 'error' outcome must be rejected with a 409 before reaching here, and
+ * a 'noop' outcome must skip this function entirely (MA-139 FR-4's
+ * idempotent-deactivate and the mirrored idempotent-reactivate-on-Active
+ * case both require no duplicate history row on the no-op path, §9). */
+function applyCustomerTransition(
+  customer: CustomerAccount,
+  action: BulkCustomerAction,
+  reason: string | null,
+  until: string | null,
+  actorAdminId: string,
+): CustomerAccount {
+  const previousStatus = customer.status;
+  const newStatus: CustomerStatus = action === 'suspend' ? 'Suspended' : action === 'deactivate' ? 'Deactivated' : 'Active';
+  const now = new Date().toISOString();
+  customer.status = newStatus;
+  customer.statusReason = newStatus === 'Active' ? null : reason;
+  customer.lastStatusChangeAt = now;
+  appendCustomerHistory(customer.id, {
+    previousStatus,
+    newStatus,
+    reason,
+    effectiveFrom: until,
+    actorAdminId,
+    createdAt: now,
+  });
+  return customer;
 }
 
 // challengeToken -> { email }
@@ -209,5 +309,155 @@ export const handlers = [
     user.status = 'Active';
     user.updatedAt = new Date().toISOString();
     return ok(user);
+  }),
+
+  // ---- MA-141 Customer Account Management (MA-139 contract) ----
+
+  http.get('/v1/admin/customers', ({ request }) => {
+    const authError = requireCustomerRole(request);
+    if (authError) return authError;
+    return ok({ items: customerAccounts, total: customerAccounts.length, page: 1, pageSize: customerAccounts.length });
+  }),
+
+  http.get('/v1/admin/customers/:id', ({ request, params }) => {
+    const authError = requireCustomerRole(request);
+    if (authError) return authError;
+    const customer = findCustomerById(params.id as string);
+    if (!customer) {
+      return fail(CustomerErrorCode.CUSTOMER_NOT_FOUND, 'Customer account not found', 404);
+    }
+    return ok({ ...customer, history: getCustomerHistory(customer.id) });
+  }),
+
+  http.post('/v1/admin/customers/:id/suspend', async ({ request, params }) => {
+    const authError = requireCustomerRole(request);
+    if (authError) return authError;
+    const customer = findCustomerById(params.id as string);
+    if (!customer) {
+      return fail(CustomerErrorCode.CUSTOMER_NOT_FOUND, 'Customer account not found', 404);
+    }
+    const body = (await request.json()) as SuspendCustomerRequest;
+    if (!body.reason?.trim() || !body.until) {
+      return fail(CustomerErrorCode.VALIDATION_ERROR, 'Reason and an end date are required to suspend an account', 400);
+    }
+    // FR-3/§9: suspending an already-Suspended account is a real update
+    // (until/reason change, new history row) — not idempotent-as-a-no-op.
+    // Only suspending an already-Deactivated account is rejected (409):
+    // must reactivate first.
+    const transition = resolveCustomerTransition('suspend', customer.status);
+    if (transition.kind === 'error') {
+      return fail(CustomerErrorCode.INVALID_STATUS_TRANSITION, transition.message, 409);
+    }
+    const decoded = decodeMockJwt(request);
+    const updated = applyCustomerTransition(customer, 'suspend', body.reason.trim(), body.until, decoded?.sub ?? 'admin-1');
+    return ok(updated);
+  }),
+
+  http.post('/v1/admin/customers/:id/deactivate', async ({ request, params }) => {
+    const authError = requireCustomerRole(request);
+    if (authError) return authError;
+    const customer = findCustomerById(params.id as string);
+    if (!customer) {
+      return fail(CustomerErrorCode.CUSTOMER_NOT_FOUND, 'Customer account not found', 404);
+    }
+    const body = (await request.json()) as DeactivateCustomerRequest;
+    if (!body.reason?.trim()) {
+      return fail(CustomerErrorCode.VALIDATION_ERROR, 'Reason is required to deactivate an account', 400);
+    }
+    // FR-4: deactivate is idempotent — an already-Deactivated account
+    // returns 200 with the unchanged account (no duplicate history row,
+    // no error). This endpoint never returns 409 (spec §6 workflow).
+    const decoded = decodeMockJwt(request);
+    const transition = resolveCustomerTransition('deactivate', customer.status);
+    const updated =
+      transition.kind === 'noop'
+        ? customer
+        : applyCustomerTransition(customer, 'deactivate', body.reason.trim(), null, decoded?.sub ?? 'admin-1');
+    return ok(updated);
+  }),
+
+  http.post('/v1/admin/customers/:id/reactivate', async ({ request, params }) => {
+    const authError = requireCustomerRole(request);
+    if (authError) return authError;
+    const customer = findCustomerById(params.id as string);
+    if (!customer) {
+      return fail(CustomerErrorCode.CUSTOMER_NOT_FOUND, 'Customer account not found', 404);
+    }
+    const body = (await request.json().catch(() => ({}))) as ReactivateCustomerRequest;
+    // FR-5: reactivate has no 409 case at all. Reactivating an
+    // already-Active account is idempotent (200, unchanged, no duplicate
+    // history row); Suspended/Deactivated both apply normally.
+    const decoded = decodeMockJwt(request);
+    const transition = resolveCustomerTransition('reactivate', customer.status);
+    const updated =
+      transition.kind === 'noop'
+        ? customer
+        : applyCustomerTransition(
+            customer,
+            'reactivate',
+            body.reason?.trim() || null,
+            null,
+            decoded?.sub ?? 'admin-1',
+          );
+    return ok(updated);
+  }),
+
+  http.post('/v1/admin/customers/bulk-status', async ({ request }) => {
+    const authError = requireCustomerRole(request);
+    if (authError) return authError;
+    const body = (await request.json()) as BulkCustomerStatusRequest;
+    const decoded = decodeMockJwt(request);
+
+    if (!isValidBulkAction(body.action)) {
+      return fail(CustomerErrorCode.VALIDATION_ERROR, `Unsupported bulk action: ${String(body.action)}`, 400);
+    }
+
+    if (body.action === 'suspend' && (!body.reason?.trim() || !body.until)) {
+      return fail(CustomerErrorCode.VALIDATION_ERROR, 'Reason and an end date are required to suspend an account', 400);
+    }
+    if (body.action === 'deactivate' && !body.reason?.trim()) {
+      return fail(CustomerErrorCode.VALIDATION_ERROR, 'Reason is required to deactivate an account', 400);
+    }
+
+    // §9 "Network failure mid-bulk-action": the UI only ever learns what the
+    // server actually completed via this per-row array — nothing here is an
+    // optimistic guess, each row is independently validated and applied
+    // against the same state machine as the single-account endpoints above
+    // (resolveCustomerTransition), so bulk and single behavior never drift.
+    const results: BulkCustomerStatusResultItem[] = body.customerIds.map((customerId) => {
+      const customer = findCustomerById(customerId);
+      if (!customer) {
+        return {
+          customerId,
+          success: false,
+          errorCode: CustomerErrorCode.CUSTOMER_NOT_FOUND,
+          message: 'Customer account no longer exists.',
+        };
+      }
+      const transition = resolveCustomerTransition(body.action, customer.status);
+      if (transition.kind === 'error') {
+        return {
+          customerId,
+          success: false,
+          errorCode: CustomerErrorCode.INVALID_STATUS_TRANSITION,
+          message: transition.message,
+        };
+      }
+      if (transition.kind === 'apply') {
+        applyCustomerTransition(
+          customer,
+          body.action,
+          body.reason?.trim() || null,
+          body.until ?? null,
+          decoded?.sub ?? 'admin-1',
+        );
+      }
+      // transition.kind === 'noop': idempotent success, no mutation, no
+      // duplicate history row — still reported as success: true, since
+      // nothing about the request failed.
+      return { customerId, success: true, errorCode: null };
+    });
+
+    return ok({ results });
   }),
 ];

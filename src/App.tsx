@@ -3,9 +3,11 @@ import LoginPage from './pages/login/LoginPage';
 import TwoFactorPage from './pages/login/TwoFactorPage';
 import DashboardPage from './pages/dashboard/DashboardPage';
 import AdminUsersPage from './pages/admin-users/AdminUsersPage';
+import CustomerAccountsPage from './pages/customer-accounts/CustomerAccountsPage';
+import CustomerDetailPage from './pages/customer-accounts/CustomerDetailPage';
 import ForbiddenPage from './pages/forbidden/ForbiddenPage';
 import AppLayout from './components/layout/AppLayout';
-import { RequireAuth, RequireSuperAdmin } from './routes/guards';
+import { RequireAuth, RequireRole, RequireSuperAdmin } from './routes/guards';
 
 export default function App() {
   return (
@@ -30,6 +32,24 @@ export default function App() {
             <RequireSuperAdmin>
               <AdminUsersPage />
             </RequireSuperAdmin>
+          }
+        />
+        {/* FR-1: Ops + SuperAdmin only (§12 Q1 proposal) — distinct route
+            prefix from /admin-users per §9's naming-collision guard. */}
+        <Route
+          path="/customer-accounts"
+          element={
+            <RequireRole roles={['Ops', 'SuperAdmin']}>
+              <CustomerAccountsPage />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/customer-accounts/:id"
+          element={
+            <RequireRole roles={['Ops', 'SuperAdmin']}>
+              <CustomerDetailPage />
+            </RequireRole>
           }
         />
       </Route>

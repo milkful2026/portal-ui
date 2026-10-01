@@ -14,6 +14,7 @@ import Button from '@mui/material/Button';
 import MenuIcon from '@mui/icons-material/Menu';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import GroupIcon from '@mui/icons-material/Group';
+import PeopleAltIcon from '@mui/icons-material/PeopleAlt';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { useAuth } from '../../auth/AuthContext';
 
@@ -30,6 +31,12 @@ export default function AppLayout() {
     { label: 'Dashboard', to: '/', icon: <DashboardIcon /> },
     ...(user?.role === 'SuperAdmin'
       ? [{ label: 'Admin Users', to: '/admin-users', icon: <GroupIcon /> }]
+      : []),
+    // FR-1: distinct label/route/icon from "Admin Users" — §9's explicit
+    // naming-collision guard (admin-account management vs. customer-
+    // account management are easy to conflate and must not be merged).
+    ...(user?.role === 'Ops' || user?.role === 'SuperAdmin'
+      ? [{ label: 'Customer Accounts', to: '/customer-accounts', icon: <PeopleAltIcon /> }]
       : []),
   ];
 

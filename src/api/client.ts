@@ -1,11 +1,19 @@
 import {
   ApiEnvelope,
   ApiError,
+  BulkCustomerStatusRequest,
+  BulkCustomerStatusResponseData,
   CreateAdminUserRequest,
   AdminUser,
+  CustomerAccount,
+  CustomerAccountDetail,
+  DeactivateCustomerRequest,
   ListAdminUsersResponseData,
+  ListCustomerAccountsResponseData,
   LoginRequest,
   LoginResponseData,
+  ReactivateCustomerRequest,
+  SuspendCustomerRequest,
   TwoFactorVerifyRequest,
   TwoFactorVerifyResponseData,
   UpdateAdminUserRequest,
@@ -114,4 +122,22 @@ export const adminUsersApi = {
     request<AdminUser>(`/admin/users/${id}/deactivate`, { method: 'POST' }),
   reactivate: (id: string) =>
     request<AdminUser>(`/admin/users/${id}/reactivate`, { method: 'POST' }),
+};
+
+// MA-139 (User Service) customer-account-management endpoints — see
+// specs/portal-ui/tasks/MA/MA-39/MA-141.md §4/§6.
+export const customerAccountsApi = {
+  list: () => request<ListCustomerAccountsResponseData>('/admin/customers', { method: 'GET' }),
+  get: (id: string) => request<CustomerAccountDetail>(`/admin/customers/${id}`, { method: 'GET' }),
+  suspend: (id: string, payload: SuspendCustomerRequest) =>
+    request<CustomerAccount>(`/admin/customers/${id}/suspend`, { method: 'POST', body: JSON.stringify(payload) }),
+  deactivate: (id: string, payload: DeactivateCustomerRequest) =>
+    request<CustomerAccount>(`/admin/customers/${id}/deactivate`, { method: 'POST', body: JSON.stringify(payload) }),
+  reactivate: (id: string, payload: ReactivateCustomerRequest) =>
+    request<CustomerAccount>(`/admin/customers/${id}/reactivate`, { method: 'POST', body: JSON.stringify(payload) }),
+  bulkStatus: (payload: BulkCustomerStatusRequest) =>
+    request<BulkCustomerStatusResponseData>('/admin/customers/bulk-status', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
 };
