@@ -12,7 +12,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { ApiError } from '../../api/types';
 import { logAdminAnalyticsEvent } from '../../utils/analytics';
 import { validateExpiryDateField, validateReceiveQuantityField } from '../../utils/inventoryValidation';
-import { INVENTORY_QUERY_KEY, useReceiveStockMutation } from './hooks';
+import { INVENTORY_LIST_QUERY_KEY, useReceiveStockMutation } from './hooks';
 
 interface Props {
   open: boolean;
@@ -80,7 +80,7 @@ export default function ReceiveStockDialog({ open, productId, onClose }: Props) 
       onClose();
     } catch (err) {
       if (err instanceof ApiError && err.httpStatus === 404) {
-        queryClient.invalidateQueries({ queryKey: INVENTORY_QUERY_KEY });
+        queryClient.invalidateQueries({ queryKey: INVENTORY_LIST_QUERY_KEY });
         enqueueSnackbar('Something changed - refresh and try again.', { variant: 'error' });
         onClose();
         return;

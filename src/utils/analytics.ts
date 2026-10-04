@@ -27,16 +27,21 @@ export type AdminAnalyticsAction =
 
 export interface AdminAnalyticsEvent {
   action: AdminAnalyticsAction;
-  targetAdminId: string;
+  // Not always an admin's own id despite the historical field name below —
+  // callers pass whatever this action's target is: an admin id
+  // (admin_user.*), a customer id (customer_account.*), or a product id
+  // (inventory.*). Named targetId, not targetAdminId, to stop implying a
+  // type the field never actually guaranteed.
+  targetId: string;
   timestamp: string;
   [key: string]: unknown;
 }
 
 /** Never include admin PII (email, IP ranges) — see NFR "Security" (§5). */
-export function logAdminAnalyticsEvent(action: AdminAnalyticsAction, targetAdminId: string, extra?: Record<string, unknown>): void {
+export function logAdminAnalyticsEvent(action: AdminAnalyticsAction, targetId: string, extra?: Record<string, unknown>): void {
   const event: AdminAnalyticsEvent = {
     action,
-    targetAdminId,
+    targetId,
     timestamp: new Date().toISOString(),
     ...extra,
   };

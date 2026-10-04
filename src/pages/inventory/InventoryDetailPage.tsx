@@ -20,16 +20,7 @@ import AdjustStockDialog from './AdjustStockDialog';
 import ReceiveStockDialog from './ReceiveStockDialog';
 import { useInventoryAuditLogQuery, useInventoryDetailQuery, useProductBatchesQuery } from './hooks';
 import InventoryStockStateBadge from './InventoryStockStateBadge';
-
-function formatDateTime(value: string | null): string {
-  if (!value) return '-';
-  return new Date(value).toLocaleString();
-}
-
-function formatDate(value: string | null): string {
-  if (!value) return '-';
-  return new Date(`${value}T00:00:00`).toLocaleDateString();
-}
+import { formatDate, formatDateTime } from '../../utils/formatters';
 
 /**
  * Product detail view (FR-3): aggregate on-hand/reserved/available/
@@ -43,8 +34,18 @@ function formatDate(value: string | null): string {
 export default function InventoryDetailPage() {
   const { productId } = useParams<{ productId: string }>();
   const { data: item, isLoading, isError, refetch } = useInventoryDetailQuery(productId);
-  const { data: batches, isLoading: batchesLoading } = useProductBatchesQuery(productId);
-  const { data: auditLog, isLoading: auditLoading } = useInventoryAuditLogQuery(productId);
+  const {
+    data: batches,
+    isLoading: batchesLoading,
+    isError: batchesError,
+    refetch: refetchBatches,
+  } = useProductBatchesQuery(productId);
+  const {
+    data: auditLog,
+    isLoading: auditLoading,
+    isError: auditError,
+    refetch: refetchAuditLog,
+  } = useInventoryAuditLogQuery(productId);
 
   const [adjustOpen, setAdjustOpen] = useState(false);
   const [receiveOpen, setReceiveOpen] = useState(false);
@@ -130,13 +131,27 @@ export default function InventoryDetailPage() {
             </Box>
           )}
 
-          {!batchesLoading && batches && batches.length === 0 && (
+          {batchesError && (
+            <Alert
+              severity="error"
+              sx={{ mb: 3 }}
+              action={
+                <Button color="inherit" size="small" onClick={() => refetchBatches()}>
+                  Retry
+                </Button>
+              }
+            >
+              Couldn't load batches. Try again.
+            </Alert>
+          )}
+
+          {!batchesLoading && !batchesError && batches && batches.length === 0 && (
             <Alert severity="info" sx={{ mb: 3 }}>
               No batches recorded yet.
             </Alert>
           )}
 
-          {!batchesLoading && batches && batches.length > 0 && (
+          {!batchesLoading && !batchesError && batches && batches.length > 0 && (
             <TableContainer component={Paper} sx={{ overflowX: 'auto', mb: 4 }}>
               <Table role="table" aria-label="Batches">
                 <TableHead>
@@ -153,7 +168,7 @@ export default function InventoryDetailPage() {
                       <TableCell>{batch.quantity}</TableCell>
                       <TableCell>{formatDate(batch.expiryDate)}</TableCell>
                       <TableCell>{formatDateTime(batch.receivedAt)}</TableCell>
-                      <TableCell>{batch.availableFrom ? formatDate(batch.availableFrom) : '-'}</TableCell>
+                      <TableCell>{batch.availableFrom ? formatDate(batch.availableFrom) : '—'}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -172,11 +187,24 @@ export default function InventoryDetailPage() {
             </Box>
           )}
 
-          {!auditLoading && auditLog && auditLog.length === 0 && (
+          {auditError && (
+            <Alert
+              severity="error"
+              action={
+                <Button color="inherit" size="small" onClick={() => refetchAuditLog()}>
+                  Retry
+                </Button>
+              }
+            >
+              Couldn't load the audit trail. Try again.
+            </Alert>
+          )}
+
+          {!auditLoading && !auditError && auditLog && auditLog.length === 0 && (
             <Alert severity="info">No adjustments or receipts recorded yet.</Alert>
           )}
 
-          {!auditLoading && auditLog && auditLog.length > 0 && (
+          {!auditLoading && !auditError && auditLog && auditLog.length > 0 && (
             <TableContainer component={Paper} sx={{ overflowX: 'auto' }}>
               <Table role="table" aria-label="Audit Trail">
                 <TableHead>
@@ -201,7 +229,7 @@ export default function InventoryDetailPage() {
                       <TableCell>{entry.previousOnHand}</TableCell>
                       <TableCell>{entry.newOnHand}</TableCell>
                       <TableCell>{entry.quantityDelta > 0 ? `+${entry.quantityDelta}` : entry.quantityDelta}</TableCell>
-                      <TableCell>{entry.reason ?? '-'}</TableCell>
+                      <TableCell>{entry.reason ?? '—'}</TableCell>
                       <TableCell>{entry.actorAdminId}</TableCell>
                       <TableCell>{formatDateTime(entry.createdAt)}</TableCell>
                     </TableRow>

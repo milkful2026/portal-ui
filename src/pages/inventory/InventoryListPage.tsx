@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
@@ -48,6 +48,18 @@ export default function InventoryListPage() {
 
   const [stockStateFilter, setStockStateFilter] = useState<StockState | 'All'>('All');
   const [filtersOpen, setFiltersOpen] = useState(false);
+
+  // The inline filter control (desktop) and the Drawer's own copy
+  // (mobile/tablet) are mutually exclusive by breakpoint, but the Drawer's
+  // `open` state doesn't know about breakpoint changes on its own - widening
+  // the window past the desktop breakpoint while the drawer is open would
+  // otherwise show both the inline control and the still-open drawer's
+  // control at once, both bound to the same stockStateFilter state.
+  useEffect(() => {
+    if (!isMobile && !isTablet) {
+      setFiltersOpen(false);
+    }
+  }, [isMobile, isTablet]);
 
   const { data: items, isLoading, isError, refetch } = useInventoryListQuery(stockStateFilter);
 

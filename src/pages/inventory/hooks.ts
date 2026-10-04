@@ -2,7 +2,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { inventoryApi } from '../../api/client';
 import { AdjustInventoryRequest, ReceiveStockRequest, StockState } from '../../api/types';
 
-export const INVENTORY_QUERY_KEY = ['inventory'] as const;
+// Namespaced under its own 'list' segment, distinct from
+// inventoryDetailQueryKey/inventoryBatchesQueryKey/inventoryAuditLogQueryKey
+// below - all four used to share a bare ['inventory'] prefix, which meant
+// invalidating "the list" via a prefix match on ['inventory'] also matched
+// every OTHER product's detail/batches/audit-log query (they all started
+// with 'inventory' too), causing an adjust/receive on one product to
+// invalidate every other product's cached data as a side effect.
+export const INVENTORY_LIST_QUERY_KEY = ['inventory', 'list'] as const;
 export const inventoryDetailQueryKey = (productId: string) => ['inventory', 'detail', productId] as const;
 export const inventoryBatchesQueryKey = (productId: string) => ['inventory', 'batches', productId] as const;
 export const inventoryAuditLogQueryKey = (productId: string) => ['inventory', 'audit-log', productId] as const;
@@ -14,7 +21,7 @@ export const inventoryAuditLogQueryKey = (productId: string) => ['inventory', 'a
  * client-side-first precedent MA-128's own list originally chose. */
 export function useInventoryListQuery(stockState: StockState | 'All') {
   return useQuery({
-    queryKey: [...INVENTORY_QUERY_KEY, stockState],
+    queryKey: [...INVENTORY_LIST_QUERY_KEY, stockState],
     queryFn: () => inventoryApi.list(stockState).then((d) => d.items),
   });
 }
@@ -62,7 +69,7 @@ export function useAdjustStockMutation() {
     onSuccess: (updated, variables) => {
       queryClient.setQueryData(inventoryDetailQueryKey(variables.productId), updated);
       queryClient.invalidateQueries({ queryKey: inventoryAuditLogQueryKey(variables.productId) });
-      queryClient.invalidateQueries({ queryKey: INVENTORY_QUERY_KEY });
+      queryClient.invalidateQueries({ queryKey: INVENTORY_LIST_QUERY_KEY });
     },
   });
 }
@@ -81,7 +88,7 @@ export function useReceiveStockMutation() {
       queryClient.invalidateQueries({ queryKey: inventoryDetailQueryKey(variables.productId) });
       queryClient.invalidateQueries({ queryKey: inventoryBatchesQueryKey(variables.productId) });
       queryClient.invalidateQueries({ queryKey: inventoryAuditLogQueryKey(variables.productId) });
-      queryClient.invalidateQueries({ queryKey: INVENTORY_QUERY_KEY });
+      queryClient.invalidateQueries({ queryKey: INVENTORY_LIST_QUERY_KEY });
     },
   });
 }

@@ -17,16 +17,7 @@ import Paper from '@mui/material/Paper';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { useCustomerDetailQuery } from './hooks';
 import CustomerStatusBadge from './CustomerStatusBadge';
-
-function formatDateTime(value: string | null): string {
-  if (!value) return '—';
-  return new Date(value).toLocaleString();
-}
-
-function formatDate(value: string | null): string {
-  if (!value) return '—';
-  return new Date(`${value}T00:00:00`).toLocaleDateString();
-}
+import { formatDate, formatDateTime } from '../../utils/formatters';
 
 /**
  * Customer detail view (FR-3): profile summary + current status + a
