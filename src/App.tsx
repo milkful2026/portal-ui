@@ -5,6 +5,8 @@ import DashboardPage from './pages/dashboard/DashboardPage';
 import AdminUsersPage from './pages/admin-users/AdminUsersPage';
 import CustomerAccountsPage from './pages/customer-accounts/CustomerAccountsPage';
 import CustomerDetailPage from './pages/customer-accounts/CustomerDetailPage';
+import InventoryListPage from './pages/inventory/InventoryListPage';
+import InventoryDetailPage from './pages/inventory/InventoryDetailPage';
 import ForbiddenPage from './pages/forbidden/ForbiddenPage';
 import AppLayout from './components/layout/AppLayout';
 import { RequireAuth, RequireRole, RequireSuperAdmin } from './routes/guards';
@@ -49,6 +51,26 @@ export default function App() {
           element={
             <RequireRole roles={['Ops', 'SuperAdmin']}>
               <CustomerDetailPage />
+            </RequireRole>
+          }
+        />
+        {/* FR-1: Ops + SuperAdmin only, identical gate to Customer
+            Accounts above - spec section 4 explicitly defers re-opening
+            MA-141 section 12 Q1's role-split question, recording the same
+            answer consistently here rather than re-litigating it. */}
+        <Route
+          path="/inventory"
+          element={
+            <RequireRole roles={['Ops', 'SuperAdmin']}>
+              <InventoryListPage />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/inventory/:productId"
+          element={
+            <RequireRole roles={['Ops', 'SuperAdmin']}>
+              <InventoryDetailPage />
             </RequireRole>
           }
         />

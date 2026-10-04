@@ -15,6 +15,7 @@ import MenuIcon from '@mui/icons-material/Menu';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import GroupIcon from '@mui/icons-material/Group';
 import PeopleAltIcon from '@mui/icons-material/PeopleAlt';
+import Inventory2Icon from '@mui/icons-material/Inventory2';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { useAuth } from '../../auth/AuthContext';
 
@@ -37,6 +38,13 @@ export default function AppLayout() {
     // account management are easy to conflate and must not be merged).
     ...(user?.role === 'Ops' || user?.role === 'SuperAdmin'
       ? [{ label: 'Customer Accounts', to: '/customer-accounts', icon: <PeopleAltIcon /> }]
+      : []),
+    // MA-151 FR-1: same Ops + SuperAdmin gate as Customer Accounts above -
+    // other roles see no nav entry at all (client-side UX only; the real
+    // authorization boundary is RequireRole at the route level in App.tsx
+    // plus the server-side check every real endpoint also enforces).
+    ...(user?.role === 'Ops' || user?.role === 'SuperAdmin'
+      ? [{ label: 'Inventory', to: '/inventory', icon: <Inventory2Icon /> }]
       : []),
   ];
 
