@@ -1,6 +1,6 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { inventoryApi } from '../../api/client';
-import { StockState } from '../../api/types';
+import { AdjustInventoryRequest, StockState } from '../../api/types';
 
 export const INVENTORY_QUERY_KEY = ['inventory'] as const;
 export const inventoryDetailQueryKey = (productId: string) => ['inventory', 'detail', productId] as const;
@@ -45,5 +45,24 @@ export function useInventoryAuditLogQuery(productId: string | undefined) {
     queryKey: inventoryAuditLogQueryKey(productId ?? ''),
     queryFn: () => inventoryApi.getAuditLog(productId!).then((d) => d.entries),
     enabled: Boolean(productId),
+  });
+}
+
+/** FR-4: PATCH /v1/inventory. Section 9's non-optimistic-on-conflict
+ * principle (same as customer-accounts/hooks.ts's reconcileCustomerCache):
+ * the detail cache is set directly to the server's returned entity
+ * (never a locally-optimistic guess), the audit-log query is invalidated
+ * (a new row now exists), and the list is invalidated broadly since we
+ * can't cheaply patch every stockState-filtered list query's cache entry
+ * in place. */
+export function useAdjustStockMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: AdjustInventoryRequest) => inventoryApi.adjust(payload),
+    onSuccess: (updated, variables) => {
+      queryClient.setQueryData(inventoryDetailQueryKey(variables.productId), updated);
+      queryClient.invalidateQueries({ queryKey: inventoryAuditLogQueryKey(variables.productId) });
+      queryClient.invalidateQueries({ queryKey: INVENTORY_QUERY_KEY });
+    },
   });
 }

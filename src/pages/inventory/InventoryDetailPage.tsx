@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link as RouterLink, useParams } from 'react-router-dom';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
@@ -15,6 +16,7 @@ import TableCell from '@mui/material/TableCell';
 import TableContainer from '@mui/material/TableContainer';
 import Paper from '@mui/material/Paper';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import AdjustStockDialog from './AdjustStockDialog';
 import { useInventoryAuditLogQuery, useInventoryDetailQuery, useProductBatchesQuery } from './hooks';
 import InventoryStockStateBadge from './InventoryStockStateBadge';
 
@@ -42,6 +44,8 @@ export default function InventoryDetailPage() {
   const { data: item, isLoading, isError, refetch } = useInventoryDetailQuery(productId);
   const { data: batches, isLoading: batchesLoading } = useProductBatchesQuery(productId);
   const { data: auditLog, isLoading: auditLoading } = useInventoryAuditLogQuery(productId);
+
+  const [adjustOpen, setAdjustOpen] = useState(false);
 
   return (
     <Box>
@@ -77,7 +81,12 @@ export default function InventoryDetailPage() {
             <Typography variant="h1" component="h1">
               {item.productId}
             </Typography>
-            <InventoryStockStateBadge state={item.stockState} />
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+              <InventoryStockStateBadge state={item.stockState} />
+              <Button variant="outlined" size="small" onClick={() => setAdjustOpen(true)}>
+                Adjust
+              </Button>
+            </Stack>
           </Stack>
 
           <Card variant="outlined" sx={{ mb: 3 }}>
@@ -198,6 +207,8 @@ export default function InventoryDetailPage() {
           )}
         </>
       )}
+
+      <AdjustStockDialog open={adjustOpen} productId={productId ?? null} onClose={() => setAdjustOpen(false)} />
     </Box>
   );
 }

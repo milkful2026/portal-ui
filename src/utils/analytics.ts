@@ -18,7 +18,12 @@ export type AdminAnalyticsAction =
   | 'customer_account.suspended'
   | 'customer_account.deactivated'
   | 'customer_account.reactivated'
-  | 'customer_account.bulk_status_changed';
+  | 'customer_account.bulk_status_changed'
+  // MA-151 NFR-Observability: extends this same action-type union for
+  // inventory.* events, same extension pattern MA-141 already used for
+  // customer_account.* above - not a new logging mechanism.
+  | 'inventory.adjusted'
+  | 'inventory.received';
 
 export interface AdminAnalyticsEvent {
   action: AdminAnalyticsAction;
