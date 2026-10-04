@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { inventoryApi } from '../../api/client';
-import { AdjustInventoryRequest, StockState } from '../../api/types';
+import { AdjustInventoryRequest, ReceiveStockRequest, StockState } from '../../api/types';
 
 export const INVENTORY_QUERY_KEY = ['inventory'] as const;
 export const inventoryDetailQueryKey = (productId: string) => ['inventory', 'detail', productId] as const;
@@ -61,6 +61,25 @@ export function useAdjustStockMutation() {
     mutationFn: (payload: AdjustInventoryRequest) => inventoryApi.adjust(payload),
     onSuccess: (updated, variables) => {
       queryClient.setQueryData(inventoryDetailQueryKey(variables.productId), updated);
+      queryClient.invalidateQueries({ queryKey: inventoryAuditLogQueryKey(variables.productId) });
+      queryClient.invalidateQueries({ queryKey: INVENTORY_QUERY_KEY });
+    },
+  });
+}
+
+/** FR-5: POST /v1/inventory/receive. The response's own `stock` field
+ * doesn't carry a `stockState`, so the detail cache is invalidated
+ * (refetched) rather than patched in place - unlike Adjust's response,
+ * which IS the full updated InventoryItem and can be set directly. The
+ * new batch means the batches, audit-log and list queries all need a
+ * refetch too (section 9's non-optimistic-on-conflict principle again). */
+export function useReceiveStockMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: ReceiveStockRequest) => inventoryApi.receive(payload),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: inventoryDetailQueryKey(variables.productId) });
+      queryClient.invalidateQueries({ queryKey: inventoryBatchesQueryKey(variables.productId) });
       queryClient.invalidateQueries({ queryKey: inventoryAuditLogQueryKey(variables.productId) });
       queryClient.invalidateQueries({ queryKey: INVENTORY_QUERY_KEY });
     },

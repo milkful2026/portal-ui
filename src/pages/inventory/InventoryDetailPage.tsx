@@ -17,6 +17,7 @@ import TableContainer from '@mui/material/TableContainer';
 import Paper from '@mui/material/Paper';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import AdjustStockDialog from './AdjustStockDialog';
+import ReceiveStockDialog from './ReceiveStockDialog';
 import { useInventoryAuditLogQuery, useInventoryDetailQuery, useProductBatchesQuery } from './hooks';
 import InventoryStockStateBadge from './InventoryStockStateBadge';
 
@@ -46,6 +47,7 @@ export default function InventoryDetailPage() {
   const { data: auditLog, isLoading: auditLoading } = useInventoryAuditLogQuery(productId);
 
   const [adjustOpen, setAdjustOpen] = useState(false);
+  const [receiveOpen, setReceiveOpen] = useState(false);
 
   return (
     <Box>
@@ -85,6 +87,9 @@ export default function InventoryDetailPage() {
               <InventoryStockStateBadge state={item.stockState} />
               <Button variant="outlined" size="small" onClick={() => setAdjustOpen(true)}>
                 Adjust
+              </Button>
+              <Button variant="contained" size="small" onClick={() => setReceiveOpen(true)}>
+                Receive Stock
               </Button>
             </Stack>
           </Stack>
@@ -209,6 +214,7 @@ export default function InventoryDetailPage() {
       )}
 
       <AdjustStockDialog open={adjustOpen} productId={productId ?? null} onClose={() => setAdjustOpen(false)} />
+      <ReceiveStockDialog open={receiveOpen} productId={productId ?? null} onClose={() => setReceiveOpen(false)} />
     </Box>
   );
 }
