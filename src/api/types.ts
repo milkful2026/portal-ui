@@ -237,3 +237,119 @@ export const CustomerErrorCode = {
   FORBIDDEN: 'FORBIDDEN',
   UNAUTHENTICATED: 'UNAUTHENTICATED',
 } as const;
+
+/**
+ * Types for the MA-151 Admin Inventory Management admin API contract.
+ *
+ * Authoritative source is MA-150 (Inventory Service's 3 new endpoints,
+ * transitively MA-118/MA-119) - see
+ * specs/portal-ui/tasks/MA/MA-48/MA-151.md section 7/8: "this spec's DTOs must be
+ * kept in sync with them during implementation." Modeled directly on that
+ * spec's section 7 JSON, following this file's existing naming convention
+ * (AdminUser/CustomerAccount, etc.) rather than inventing a new one.
+ */
+
+export type StockState = 'IN_STOCK' | 'OUT_OF_STOCK' | 'AVAILABLE_FROM';
+
+export interface InventoryItem {
+  productId: string;
+  onHand: number;
+  reserved: number;
+  available: number;
+  stockState: StockState;
+  lowStockThreshold: number;
+}
+
+// ---- GET /v1/inventory/{productId}/batches ----
+export interface StockBatch {
+  batchId: string;
+  quantity: number;
+  /** ISO-8601 date (YYYY-MM-DD). */
+  expiryDate: string;
+  /** ISO-8601 date (YYYY-MM-DD), or null when already available. */
+  availableFrom: string | null;
+  /** ISO-8601 timestamp. */
+  receivedAt: string;
+}
+
+export type InventoryAuditActionType = 'ADJUST' | 'RECEIVE';
+
+// ---- GET /v1/inventory/{productId}/audit-log ----
+// Shape deliberately mirrors CustomerStatusHistoryEntry (previous/new
+// value, reason, actor, timestamp) per MA-151 FR-3: "reusing the exact
+// table shape CustomerDetailPage's status-history table already
+// established" - the who/what/when/why columns are the same idea, applied
+// to a quantity instead of a status.
+export interface InventoryAuditLogEntry {
+  actionType: InventoryAuditActionType;
+  previousOnHand: number;
+  newOnHand: number;
+  quantityDelta: number;
+  reason: string | null;
+  actorAdminId: string;
+  createdAt: string;
+}
+
+// ---- GET /v1/inventory ----
+export interface ListInventoryResponseData {
+  items: InventoryItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface ListStockBatchesResponseData {
+  batches: StockBatch[];
+}
+
+export interface ListInventoryAuditLogResponseData {
+  entries: InventoryAuditLogEntry[];
+}
+
+// ---- PATCH /v1/inventory ---- (MA-119 FR-1)
+export interface AdjustInventoryRequest {
+  productId: string;
+  /** Signed: positive to add, negative to remove/report spoilage (FR-4). */
+  quantityDelta: number;
+  reason: string;
+}
+
+// ---- POST /v1/inventory/receive ---- (MA-150)
+export interface ReceiveStockRequest {
+  productId: string;
+  /** Positive integer. */
+  quantity: number;
+  /** ISO-8601 date; must be a future date (FR-5, validated client-side
+   * before submit - final validation authority is still the backend). */
+  expiryDate: string;
+  reason?: string;
+}
+
+export interface ReceiveStockResponseData {
+  batchId: string;
+  productId: string;
+  quantity: number;
+  expiryDate: string;
+  stock: {
+    onHand: number;
+    reserved: number;
+    available: number;
+  };
+}
+
+/** Error-code taxonomy for the MA-150/MA-119 inventory endpoints -
+ * distinct from AdminErrorCode/CustomerErrorCode, since this is a third,
+ * separate backend service/contract. ON_HAND_NEGATIVE and
+ * AVAILABLE_NEGATIVE are two distinct codes (not one generic
+ * VALIDATION_ERROR) because MA-119 FR-1 defines them as two distinct
+ * floor-at-zero checks with two distinct admin-facing explanations (FR-4/
+ * section 9/10) - collapsing them back into one code client-side would silently
+ * re-introduce the generic-error problem the spec explicitly calls out. */
+export const InventoryErrorCode = {
+  VALIDATION_ERROR: 'VALIDATION_ERROR',
+  PRODUCT_NOT_FOUND: 'PRODUCT_NOT_FOUND',
+  ON_HAND_NEGATIVE: 'ON_HAND_NEGATIVE',
+  AVAILABLE_NEGATIVE: 'AVAILABLE_NEGATIVE',
+  FORBIDDEN: 'FORBIDDEN',
+  UNAUTHENTICATED: 'UNAUTHENTICATED',
+} as const;
