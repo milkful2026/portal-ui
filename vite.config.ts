@@ -47,6 +47,17 @@ export default defineConfig(({ mode }) => {
             target: 'http://localhost:8002',
             changeOrigin: true,
           },
+          // Admin Inventory Management (MA-151) talks to the Inventory
+          // Service (MA-118/MA-119/MA-150), not Identity & Auth either -
+          // port 8000 per services/local-dev/docker-compose.yml's own
+          // "8000:8000" mapping for the `inventory` container. Must
+          // precede the blanket '/v1' rule below for the same
+          // insertion-order reason as the '/v1/admin/customers' rule
+          // above.
+          '/v1/inventory': {
+            target: 'http://localhost:8000',
+            changeOrigin: true,
+          },
           '/v1': {
             // Real identity-auth service running via services/local-dev
             // (docker compose up -d), port 8001 per that service's own

@@ -2,18 +2,28 @@ import { http, HttpResponse } from 'msw';
 import {
   adminUsers,
   appendCustomerHistory,
+  appendProductAuditEntry,
+  appendProductBatch,
   customerAccounts,
   findByEmail,
   findById,
   findCustomerById,
+  findInventoryRecord,
   getCustomerHistory,
+  getProductAuditLog,
+  getProductBatches,
+  inventoryRecords,
   MOCK_PASSWORD,
   MOCK_TOTP_CODE,
+  nextBatchId,
   nextId,
 } from './db';
 import { buildMockJwt } from './jwt';
 import { resolveCustomerTransition } from '../utils/customerTransitions';
+import { isFutureDate } from '../utils/futureDate';
+import { checkAdjustmentFloor, computeAvailable, computeStockState } from '../utils/inventoryAdjustment';
 import {
+  AdjustInventoryRequest,
   AdminErrorCode,
   AdminRole,
   AdminUser,
@@ -25,12 +35,17 @@ import {
   CustomerErrorCode,
   CustomerStatus,
   DeactivateCustomerRequest,
+  InventoryErrorCode,
+  InventoryItem,
   LoginRequest,
   ReactivateCustomerRequest,
+  ReceiveStockRequest,
+  StockBatch,
   SuspendCustomerRequest,
   TwoFactorVerifyRequest,
   UpdateAdminUserRequest,
 } from '../api/types';
+import { InventoryRecord } from './db';
 
 function ok<T>(data: T, status = 200) {
   return HttpResponse.json({ requestId: crypto.randomUUID(), status: 'success', data }, { status });
@@ -96,6 +111,40 @@ function requireCustomerRole(request: Request): Response | null {
     return fail(CustomerErrorCode.FORBIDDEN, 'Permission denied', 403);
   }
   return null;
+}
+
+/** Inventory endpoints require a valid Bearer token AND the FR-1 role gate
+ * (Ops + SuperAdmin) - identical posture to requireCustomerRole above, per
+ * spec section 5 "enforced server-side (client-side hiding is UX only,
+ * never the authorization boundary)". This repo has twice now shipped a
+ * mock that skipped this kind of check and let a real bug through
+ * undetected (see requireAuth's own docstring) - not repeating that here. */
+function requireInventoryRole(request: Request): Response | null {
+  const authError = requireAuth(request);
+  if (authError) return authError;
+  const decoded = decodeMockJwt(request);
+  if (!decoded || !(['Ops', 'SuperAdmin'] as AdminRole[]).includes(decoded.role)) {
+    return fail(InventoryErrorCode.FORBIDDEN, 'Permission denied', 403);
+  }
+  return null;
+}
+
+/** Builds the API-facing InventoryItem from the mutable DB record plus its
+ * batches - `available`/`stockState` are ALWAYS derived here, never read
+ * off a stored (and therefore staleable) field. See db.ts's own docstring
+ * for why. */
+function toInventoryItem(record: InventoryRecord): InventoryItem {
+  const batches = getProductBatches(record.productId);
+  const available = computeAvailable(record.onHand, record.reserved, batches);
+  const stockState = computeStockState(available, batches);
+  return {
+    productId: record.productId,
+    onHand: record.onHand,
+    reserved: record.reserved,
+    available,
+    stockState,
+    lowStockThreshold: record.lowStockThreshold,
+  };
 }
 
 const VALID_BULK_ACTIONS: BulkCustomerAction[] = ['suspend', 'deactivate', 'reactivate'];
@@ -459,5 +508,164 @@ export const handlers = [
     });
 
     return ok({ results });
+  }),
+
+  // ---- MA-151 Admin Inventory Management (MA-150/MA-119 contract) ----
+
+  http.get('/v1/inventory', ({ request }) => {
+    const authError = requireInventoryRole(request);
+    if (authError) return authError;
+    const url = new URL(request.url);
+    const stockStateParam = url.searchParams.get('stockState');
+    let items = inventoryRecords.map(toInventoryItem);
+    if (stockStateParam) {
+      items = items.filter((item) => item.stockState === stockStateParam);
+    }
+    return ok({ items, total: items.length, page: 1, pageSize: items.length });
+  }),
+
+  http.get('/v1/inventory/:productId/batches', ({ request, params }) => {
+    const authError = requireInventoryRole(request);
+    if (authError) return authError;
+    const record = findInventoryRecord(params.productId as string);
+    if (!record) {
+      return fail(InventoryErrorCode.PRODUCT_NOT_FOUND, 'Product not found', 404);
+    }
+    // FR-3: oldest-expiry-first - matches MA-150 FR-2's own FIFO draw
+    // order, so what the admin sees matches real draw order.
+    const batches = [...getProductBatches(record.productId)].sort(
+      (a, b) => new Date(a.expiryDate).getTime() - new Date(b.expiryDate).getTime(),
+    );
+    return ok({ batches });
+  }),
+
+  http.get('/v1/inventory/:productId/audit-log', ({ request, params }) => {
+    const authError = requireInventoryRole(request);
+    if (authError) return authError;
+    const record = findInventoryRecord(params.productId as string);
+    if (!record) {
+      return fail(InventoryErrorCode.PRODUCT_NOT_FOUND, 'Product not found', 404);
+    }
+    // Already stored newest-first (appendProductAuditEntry only ever
+    // unshifts) - FR-3's "newest-first" audit-trail requirement.
+    return ok({ entries: getProductAuditLog(record.productId) });
+  }),
+
+  // GET /v1/inventory/{productId} (aggregate detail, MA-118) - kept after
+  // the two more specific /:productId/batches and /:productId/audit-log
+  // routes above since MSW matches path patterns in registration order
+  // and a bare '/:productId' would otherwise shadow them (same ordering
+  // lesson vite.config.ts's own comment calls out for its proxy rules).
+  http.get('/v1/inventory/:productId', ({ request, params }) => {
+    const authError = requireInventoryRole(request);
+    if (authError) return authError;
+    const record = findInventoryRecord(params.productId as string);
+    if (!record) {
+      return fail(InventoryErrorCode.PRODUCT_NOT_FOUND, 'Product not found', 404);
+    }
+    return ok(toInventoryItem(record));
+  }),
+
+  http.patch('/v1/inventory', async ({ request }) => {
+    const authError = requireInventoryRole(request);
+    if (authError) return authError;
+    const body = (await request.json()) as AdjustInventoryRequest;
+
+    if (!body.reason?.trim()) {
+      return fail(InventoryErrorCode.VALIDATION_ERROR, 'Reason is required to adjust stock.', 400);
+    }
+    if (!Number.isInteger(body.quantityDelta) || body.quantityDelta === 0) {
+      return fail(InventoryErrorCode.VALIDATION_ERROR, 'Quantity must be a non-zero whole number.', 400);
+    }
+
+    const record = findInventoryRecord(body.productId);
+    if (!record) {
+      return fail(InventoryErrorCode.PRODUCT_NOT_FOUND, 'Product not found', 404);
+    }
+
+    // FR-4/section 9/10: the two floor-at-zero checks MUST stay two
+    // distinct checks with two distinct messages - see
+    // checkAdjustmentFloor's own docstring. Never collapse this into one
+    // generic rejection.
+    const batches = getProductBatches(record.productId);
+    const check = checkAdjustmentFloor(record.onHand, record.reserved, body.quantityDelta, batches);
+    if (!check.ok) {
+      return fail(check.errorCode, check.message, 400);
+    }
+
+    const previousOnHand = record.onHand;
+    record.onHand = previousOnHand + body.quantityDelta;
+    const decoded = decodeMockJwt(request);
+    appendProductAuditEntry(record.productId, {
+      actionType: 'ADJUST',
+      previousOnHand,
+      newOnHand: record.onHand,
+      quantityDelta: body.quantityDelta,
+      reason: body.reason.trim(),
+      actorAdminId: decoded?.sub ?? 'admin-1',
+      createdAt: new Date().toISOString(),
+    });
+
+    return ok(toInventoryItem(record));
+  }),
+
+  http.post('/v1/inventory/receive', async ({ request }) => {
+    const authError = requireInventoryRole(request);
+    if (authError) return authError;
+    const body = (await request.json()) as ReceiveStockRequest;
+
+    if (!Number.isInteger(body.quantity) || body.quantity <= 0) {
+      return fail(InventoryErrorCode.VALIDATION_ERROR, 'Quantity must be a positive whole number.', 400);
+    }
+    // FR-5/section 9: a past expiry date must be rejected here too (client
+    // validation is UX only, never the authorization/validation boundary) -
+    // reuses the exact isFutureDate check the Suspend dialog's "Until"
+    // field already established, rather than inventing a second one.
+    if (!body.expiryDate || !isFutureDate(body.expiryDate)) {
+      return fail(InventoryErrorCode.VALIDATION_ERROR, 'Expiry date must be a future date.', 400);
+    }
+
+    const record = findInventoryRecord(body.productId);
+    if (!record) {
+      return fail(InventoryErrorCode.PRODUCT_NOT_FOUND, 'Product not found', 404);
+    }
+
+    const batchId = nextBatchId();
+    const receivedAt = new Date().toISOString();
+    const newBatch: StockBatch = {
+      batchId,
+      quantity: body.quantity,
+      expiryDate: body.expiryDate,
+      availableFrom: null,
+      receivedAt,
+    };
+    appendProductBatch(record.productId, newBatch);
+
+    const previousOnHand = record.onHand;
+    record.onHand = previousOnHand + body.quantity;
+    const decoded = decodeMockJwt(request);
+    appendProductAuditEntry(record.productId, {
+      actionType: 'RECEIVE',
+      previousOnHand,
+      newOnHand: record.onHand,
+      quantityDelta: body.quantity,
+      reason: body.reason?.trim() || null,
+      actorAdminId: decoded?.sub ?? 'admin-1',
+      createdAt: receivedAt,
+    });
+
+    const batches = getProductBatches(record.productId);
+    const available = computeAvailable(record.onHand, record.reserved, batches);
+
+    return ok(
+      {
+        batchId,
+        productId: record.productId,
+        quantity: body.quantity,
+        expiryDate: body.expiryDate,
+        stock: { onHand: record.onHand, reserved: record.reserved, available },
+      },
+      201,
+    );
   }),
 ];

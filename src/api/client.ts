@@ -1,4 +1,5 @@
 import {
+  AdjustInventoryRequest,
   ApiEnvelope,
   ApiError,
   BulkCustomerStatusRequest,
@@ -8,11 +9,18 @@ import {
   CustomerAccount,
   CustomerAccountDetail,
   DeactivateCustomerRequest,
+  InventoryItem,
   ListAdminUsersResponseData,
   ListCustomerAccountsResponseData,
+  ListInventoryAuditLogResponseData,
+  ListInventoryResponseData,
+  ListStockBatchesResponseData,
   LoginRequest,
   LoginResponseData,
   ReactivateCustomerRequest,
+  ReceiveStockRequest,
+  ReceiveStockResponseData,
+  StockState,
   SuspendCustomerRequest,
   TwoFactorVerifyRequest,
   TwoFactorVerifyResponseData,
@@ -140,4 +148,27 @@ export const customerAccountsApi = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+};
+
+// MA-150/MA-119 (Inventory Service) admin inventory-management endpoints -
+// see specs/portal-ui/tasks/MA/MA-48/MA-151.md section 4/6. Paths are
+// '/inventory...', not '/admin/inventory...' - this spec's own section 6
+// table lists the real paths as '/v1/inventory', '/v1/inventory/receive',
+// etc, unlike the '/admin/customers' and '/admin/users' prefixes the two
+// earlier services use.
+export const inventoryApi = {
+  list: (stockState?: StockState | 'All') =>
+    request<ListInventoryResponseData>(
+      `/inventory${stockState && stockState !== 'All' ? `?stockState=${stockState}` : ''}`,
+      { method: 'GET' },
+    ),
+  getDetail: (productId: string) => request<InventoryItem>(`/inventory/${productId}`, { method: 'GET' }),
+  getBatches: (productId: string) =>
+    request<ListStockBatchesResponseData>(`/inventory/${productId}/batches`, { method: 'GET' }),
+  getAuditLog: (productId: string) =>
+    request<ListInventoryAuditLogResponseData>(`/inventory/${productId}/audit-log`, { method: 'GET' }),
+  adjust: (payload: AdjustInventoryRequest) =>
+    request<InventoryItem>('/inventory', { method: 'PATCH', body: JSON.stringify(payload) }),
+  receive: (payload: ReceiveStockRequest) =>
+    request<ReceiveStockResponseData>('/inventory/receive', { method: 'POST', body: JSON.stringify(payload) }),
 };
