@@ -536,7 +536,7 @@ export const handlers = [
     const batches = [...getProductBatches(record.productId)].sort(
       (a, b) => new Date(a.expiryDate).getTime() - new Date(b.expiryDate).getTime(),
     );
-    return ok({ batches });
+    return ok({ items: batches });
   }),
 
   http.get('/v1/inventory/:productId/audit-log', ({ request, params }) => {
@@ -548,7 +548,8 @@ export const handlers = [
     }
     // Already stored newest-first (appendProductAuditEntry only ever
     // unshifts) - FR-3's "newest-first" audit-trail requirement.
-    return ok({ entries: getProductAuditLog(record.productId) });
+    const entries = getProductAuditLog(record.productId);
+    return ok({ items: entries, total: entries.length, page: 1, pageSize: entries.length || 50 });
   }),
 
   // GET /v1/inventory/{productId} (aggregate detail, MA-118) - kept after

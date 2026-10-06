@@ -41,7 +41,7 @@ export function useInventoryDetailQuery(productId: string | undefined) {
 export function useProductBatchesQuery(productId: string | undefined) {
   return useQuery({
     queryKey: inventoryBatchesQueryKey(productId ?? ''),
-    queryFn: () => inventoryApi.getBatches(productId!).then((d) => d.batches),
+    queryFn: () => inventoryApi.getBatches(productId!).then((d) => d.items),
     enabled: Boolean(productId),
   });
 }
@@ -50,7 +50,7 @@ export function useProductBatchesQuery(productId: string | undefined) {
 export function useInventoryAuditLogQuery(productId: string | undefined) {
   return useQuery({
     queryKey: inventoryAuditLogQueryKey(productId ?? ''),
-    queryFn: () => inventoryApi.getAuditLog(productId!).then((d) => d.entries),
+    queryFn: () => inventoryApi.getAuditLog(productId!).then((d) => d.items),
     enabled: Boolean(productId),
   });
 }
