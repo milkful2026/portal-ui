@@ -46,11 +46,16 @@ export function useProductBatchesQuery(productId: string | undefined) {
   });
 }
 
-/** FR-3: audit-trail table, newest-first. */
+/** FR-3: audit-trail table, newest-first. Exposes `total` alongside
+ * `items` (not just the array, unlike the sibling batches/list queries)
+ * so the page can tell a fully-loaded product apart from one whose
+ * history exceeds getAuditLog's own pageSize=500 cap - see that
+ * function's own docstring. */
 export function useInventoryAuditLogQuery(productId: string | undefined) {
   return useQuery({
     queryKey: inventoryAuditLogQueryKey(productId ?? ''),
-    queryFn: () => inventoryApi.getAuditLog(productId!).then((d) => d.items),
+    queryFn: () => inventoryApi.getAuditLog(productId!),
+    select: (d) => ({ items: d.items, total: d.total }),
     enabled: Boolean(productId),
   });
 }

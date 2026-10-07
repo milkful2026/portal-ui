@@ -41,11 +41,12 @@ export default function InventoryDetailPage() {
     refetch: refetchBatches,
   } = useProductBatchesQuery(productId);
   const {
-    data: auditLog,
+    data: auditLogResult,
     isLoading: auditLoading,
     isError: auditError,
     refetch: refetchAuditLog,
   } = useInventoryAuditLogQuery(productId);
+  const auditLog = auditLogResult?.items;
 
   const [adjustOpen, setAdjustOpen] = useState(false);
   const [receiveOpen, setReceiveOpen] = useState(false);
@@ -238,6 +239,20 @@ export default function InventoryDetailPage() {
               </Table>
             </TableContainer>
           )}
+
+          {!auditLoading &&
+            !auditError &&
+            auditLog &&
+            auditLogResult &&
+            auditLogResult.total > auditLog.length && (
+              // getAuditLog() requests pageSize=500 (its own docstring),
+              // not true pagination - this is the rare product whose
+              // history exceeds even that, surfaced rather than silently
+              // shown as if it were the complete trail.
+              <Alert severity="info" sx={{ mt: 1 }}>
+                Showing the most recent {auditLog.length} of {auditLogResult.total} entries.
+              </Alert>
+            )}
         </>
       )}
 

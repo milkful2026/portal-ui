@@ -165,8 +165,17 @@ export const inventoryApi = {
   getDetail: (productId: string) => request<InventoryItem>(`/inventory/${productId}`, { method: 'GET' }),
   getBatches: (productId: string) =>
     request<ListStockBatchesResponseData>(`/inventory/${productId}/batches`, { method: 'GET' }),
+  // pageSize=500 - the backend's own declared max (admin_inventory_
+  // handler.py's `Query(default=50, ge=1, le=500)`) - rather than its
+  // default 50, so a product's full audit history loads in one call for
+  // any realistic admin-adjustment/receipt volume. Not real pagination
+  // (no page param, no "load more"): see InventoryDetailPage.tsx's own
+  // handling of `total` for what happens on the rare product that
+  // exceeds even this.
   getAuditLog: (productId: string) =>
-    request<ListInventoryAuditLogResponseData>(`/inventory/${productId}/audit-log`, { method: 'GET' }),
+    request<ListInventoryAuditLogResponseData>(`/inventory/${productId}/audit-log?pageSize=500`, {
+      method: 'GET',
+    }),
   adjust: (payload: AdjustInventoryRequest) =>
     request<InventoryItem>('/inventory', { method: 'PATCH', body: JSON.stringify(payload) }),
   receive: (payload: ReceiveStockRequest) =>
