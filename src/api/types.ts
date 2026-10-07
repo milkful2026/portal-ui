@@ -299,11 +299,14 @@ export interface ListInventoryResponseData {
 }
 
 export interface ListStockBatchesResponseData {
-  batches: StockBatch[];
+  items: StockBatch[];
 }
 
 export interface ListInventoryAuditLogResponseData {
-  entries: InventoryAuditLogEntry[];
+  items: InventoryAuditLogEntry[];
+  total: number;
+  page: number;
+  pageSize: number;
 }
 
 // ---- PATCH /v1/inventory ---- (MA-119 FR-1)
