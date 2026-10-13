@@ -23,7 +23,13 @@ export type AdminAnalyticsAction =
   // inventory.* events, same extension pattern MA-141 already used for
   // customer_account.* above - not a new logging mechanism.
   | 'inventory.adjusted'
-  | 'inventory.received';
+  | 'inventory.received'
+  // MA-157 NFR-Observability: catalog.* events, same extension pattern.
+  | 'catalog.product_created'
+  | 'catalog.product_updated'
+  | 'catalog.product_deactivated'
+  | 'catalog.category_created'
+  | 'catalog.category_updated';
 
 export interface AdminAnalyticsEvent {
   action: AdminAnalyticsAction;

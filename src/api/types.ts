@@ -356,3 +356,186 @@ export const InventoryErrorCode = {
   FORBIDDEN: 'FORBIDDEN',
   UNAUTHENTICATED: 'UNAUTHENTICATED',
 } as const;
+
+/**
+ * Types for the MA-157 Admin Catalog Management contract.
+ *
+ * Authoritative source is MA-156 (Catalog Service's admin-write API) -
+ * see specs/portal-ui/tasks/MA/MA-42/MA-157.md section 7/8: "this spec's
+ * DTOs must be kept in sync with it during implementation." Live-verified
+ * against the real, running catalog service on 2026-10-14 (per that
+ * spec's own implementation plan step 1 mandate: "re-verify every
+ * response field name against this real output, not against MA-157
+ * section 7's JSON examples alone") - two real divergences found and
+ * corrected here, not assumed from the spec text:
+ *
+ * 1. MA-156 section 7's own example showed the single-product response's
+ *    price field as "priceB2c" - the real, shipped field has always been
+ *    `price` (serialize_product in catalog/src/handlers/dto.py). Named
+ *    `price` below, matching reality.
+ * 2. That same response never included `priceB2b` at all until a fix
+ *    found and pushed while building this page (services PR #38,
+ *    fix/MA-156-missing-price-b2b) - without it there would be no way to
+ *    show/edit the field's current value on this page's detail/edit
+ *    form. Assume PR #38 is merged before relying on `priceB2b` here.
+ *
+ * `GET /admin/products` (the list endpoint) is a deliberately narrower
+ * projection - AdminProductListItem below, NOT CatalogProduct - confirmed
+ * directly against the real response: no description/unit/hsnCode/
+ * taxRate/tag/isVeg/isOrganic/subscriptionEligible/imageUrl/priceB2b,
+ * only id/categoryId/name/priceB2c/priceB2b/isActive/stockState/
+ * createdAt/updatedAt. The detail/edit page must fetch the full shape via
+ * `GET /products/{id}` (CatalogProduct) separately - there is no single
+ * endpoint that returns everything this page's FR-4 needs in one call.
+ */
+
+export type CatalogStockState = 'IN_STOCK' | 'OUT_OF_STOCK' | 'AVAILABLE_FROM';
+
+export interface CatalogCategory {
+  id: string;
+  name: string;
+  iconName: string;
+  /** Always present - serialize_category (shared by GET /categories,
+   * POST /categories, and PATCH /categories/{id} alike) was found
+   * missing this field while building this page (services PR #38,
+   * fix/MA-156-missing-price-b2b) and fixed there uniformly, not just
+   * on the write responses. Non-optional here on purpose: an earlier
+   * version of this type made it optional based on a stale pre-fix
+   * read of the backend, which let CategoryFormDialog silently default
+   * a missing value to 0 and overwrite the real sort order on every
+   * edit (code review finding) - assume PR #38 is merged. */
+  sortOrder: number;
+}
+
+// ---- GET /products/{id}, POST /products, PATCH /products/{id} ----
+// The full product shape - this spec's detail/edit page (FR-4) is the
+// only portal-ui consumer that needs every field here.
+export interface CatalogProduct {
+  id: string;
+  categoryId: string;
+  name: string;
+  description: string;
+  unit: string;
+  /** B2C price - named `price` on the wire, not `priceB2c` (see module
+   * docstring point 1). */
+  price: number;
+  priceB2b: number | null;
+  imageUrl: string | null;
+  tag: string | null;
+  subscriptionEligible: boolean;
+  isVeg: boolean;
+  isOrganic: boolean;
+  stockState: CatalogStockState;
+  availableFrom: string | null;
+  isActive: boolean;
+  hsnCode: string | null;
+  taxRate: number | null;
+}
+
+// ---- GET /admin/products ---- (FR-2)
+// Deliberately narrower than CatalogProduct - see module docstring.
+export interface AdminProductListItem {
+  id: string;
+  categoryId: string;
+  name: string;
+  priceB2c: number;
+  priceB2b: number | null;
+  isActive: boolean;
+  stockState: CatalogStockState;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ListAdminProductsResponseData {
+  items: AdminProductListItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+// ---- GET /products/{id}/audit-log ---- (FR-4)
+export type CatalogAuditAction = 'CREATE' | 'UPDATE';
+
+export interface CatalogAuditLogEntry {
+  id: string;
+  productId: string;
+  adminId: string;
+  action: CatalogAuditAction;
+  /** Changed-fields-only diff, keyed by the same camelCase wire names as
+   * CatalogProduct (catalog/src/adapters/product_repository.py's
+   * `_COLUMN_TO_WIRE` translation) - null on a CREATE's previousValue. */
+  previousValue: Record<string, unknown> | null;
+  newValue: Record<string, unknown> | null;
+  reason: string | null;
+  createdAt: string;
+}
+
+export interface ListCatalogAuditLogResponseData {
+  items: CatalogAuditLogEntry[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+// ---- POST /products ---- (FR-3)
+export interface CreateCatalogProductRequest {
+  categoryId: string;
+  name: string;
+  description: string;
+  unit: string;
+  priceB2c: number;
+  priceB2b?: number | null;
+  imageUrl?: string | null;
+  tag?: string | null;
+  subscriptionEligible: boolean;
+  isVeg: boolean;
+  isOrganic: boolean;
+  hsnCode?: string | null;
+  taxRate?: number | null;
+  reason?: string;
+}
+
+// ---- PATCH /products/{id} ---- (FR-4) - every field optional; only
+// fields the caller actually wants to change should be included.
+export interface UpdateCatalogProductRequest {
+  categoryId?: string;
+  name?: string;
+  description?: string;
+  unit?: string;
+  priceB2c?: number;
+  priceB2b?: number | null;
+  imageUrl?: string | null;
+  tag?: string | null;
+  subscriptionEligible?: boolean;
+  isVeg?: boolean;
+  isOrganic?: boolean;
+  hsnCode?: string | null;
+  taxRate?: number | null;
+  isActive?: boolean;
+  reason?: string;
+}
+
+// ---- POST /categories ---- (FR-5)
+export interface CreateCatalogCategoryRequest {
+  name: string;
+  iconName: string;
+  sortOrder?: number;
+}
+
+// ---- PATCH /categories/{id} ---- (FR-5)
+export interface UpdateCatalogCategoryRequest {
+  name?: string;
+  iconName?: string;
+  sortOrder?: number;
+}
+
+/** Error-code taxonomy for the MA-156 catalog admin-write endpoints -
+ * distinct from the other three taxonomies above, since this is a
+ * fourth, separate backend service/contract. */
+export const CatalogErrorCode = {
+  VALIDATION_ERROR: 'VALIDATION_ERROR',
+  PRODUCT_NOT_FOUND: 'PRODUCT_NOT_FOUND',
+  CATEGORY_NOT_FOUND: 'CATEGORY_NOT_FOUND',
+  FORBIDDEN: 'FORBIDDEN',
+  UNAUTHENTICATED: 'UNAUTHENTICATED',
+} as const;

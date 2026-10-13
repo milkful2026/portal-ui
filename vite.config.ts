@@ -58,6 +58,37 @@ export default defineConfig(({ mode }) => {
             target: 'http://localhost:8000',
             changeOrigin: true,
           },
+          // Admin Catalog Management (MA-157) talks to Catalog Service
+          // (MA-156), port 8003 per docker-compose.yml's "8003:8003"
+          // mapping. Unlike every other backend above, Catalog's real
+          // routes have NO '/v1' prefix at all (confirmed directly from
+          // catalog/src/handlers/app.py/products_handler.py/
+          // categories_handler.py's include_router() calls - a
+          // deliberate MA-156 §6 decision, not an oversight) - `rewrite`
+          // strips it back off before forwarding, so this app's client
+          // code and MSW mocks can still treat '/v1/...' as the uniform
+          // namespace every other endpoint already uses. Must precede
+          // the blanket '/v1' rule below for the same insertion-order
+          // reason as every other specific rule here. Three separate
+          // prefixes, not one broader one, since '/v1/products' and
+          // '/v1/categories' don't share a common parent segment with
+          // '/v1/admin/products' the way a single '/v1/catalog' prefix
+          // would have let this be one rule.
+          '/v1/admin/products': {
+            target: 'http://localhost:8003',
+            changeOrigin: true,
+            rewrite: (path: string) => path.replace(/^\/v1/, ''),
+          },
+          '/v1/products': {
+            target: 'http://localhost:8003',
+            changeOrigin: true,
+            rewrite: (path: string) => path.replace(/^\/v1/, ''),
+          },
+          '/v1/categories': {
+            target: 'http://localhost:8003',
+            changeOrigin: true,
+            rewrite: (path: string) => path.replace(/^\/v1/, ''),
+          },
           '/v1': {
             // Real identity-auth service running via services/local-dev
             // (docker compose up -d), port 8001 per that service's own

@@ -1,4 +1,13 @@
-import { AdminUser, CustomerAccount, CustomerStatusHistoryEntry, InventoryAuditLogEntry, StockBatch } from '../api/types';
+import {
+  AdminUser,
+  CatalogAuditLogEntry,
+  CatalogCategory,
+  CatalogProduct,
+  CustomerAccount,
+  CustomerStatusHistoryEntry,
+  InventoryAuditLogEntry,
+  StockBatch,
+} from '../api/types';
 
 export const MOCK_PASSWORD = 'Passw0rd!';
 export const MOCK_TOTP_CODE = '123456';
@@ -383,4 +392,191 @@ export function appendProductAuditEntry(productId: string, entry: InventoryAudit
 let batchIdCounter = 100;
 export function nextBatchId(): string {
   return `batch-${batchIdCounter++}`;
+}
+
+/**
+ * In-memory catalog directory for MSW (MA-157). Reset on page reload -
+ * dev/test mock only, same constraint as the directories above.
+ *
+ * Seeded with a deliberate mix so every FR-2 filter value and FR-4 edit
+ * field is demoable without any manual setup:
+ *   - catalog-product-1: active, has priceB2b/hsnCode/taxRate/tag all
+ *     set, and a two-entry audit history (CREATE + an UPDATE that
+ *     changed only price) - the "fully detailed" product
+ *   - catalog-product-2: active, minimal optional fields (all null) -
+ *     the "freshly created, nothing extra" edge case
+ *   - catalog-product-3: INACTIVE - FR-2's "still visible to the admin
+ *     list, de-emphasized" case and FR-4's deactivate-toggle starting
+ *     state
+ *   - catalog-product-4/5: active, spread across a second category, so
+ *     the categoryId filter has something real to narrow down
+ */
+export const catalogCategories: CatalogCategory[] = [
+  { id: 'cat-milk', name: 'Fresh Milk', iconName: 'milk', sortOrder: 0 },
+  { id: 'cat-curd', name: 'Yogurt & Curd', iconName: 'curd', sortOrder: 1 },
+];
+
+export const catalogProducts: CatalogProduct[] = [
+  {
+    id: 'catalog-product-1',
+    categoryId: 'cat-milk',
+    name: 'Cow Milk',
+    description: 'Farm-fresh cow milk, pasteurized daily.',
+    unit: '1L Bottle',
+    price: 68,
+    priceB2b: 60,
+    imageUrl: null,
+    tag: 'Bestseller',
+    subscriptionEligible: true,
+    isVeg: true,
+    isOrganic: false,
+    stockState: 'IN_STOCK',
+    availableFrom: null,
+    isActive: true,
+    hsnCode: '0401',
+    taxRate: 5,
+  },
+  {
+    id: 'catalog-product-2',
+    categoryId: 'cat-milk',
+    name: 'Buffalo Milk',
+    description: 'Rich, creamy buffalo milk.',
+    unit: '1L Pouch',
+    price: 84,
+    priceB2b: null,
+    imageUrl: null,
+    tag: null,
+    subscriptionEligible: true,
+    isVeg: true,
+    isOrganic: false,
+    stockState: 'IN_STOCK',
+    availableFrom: null,
+    isActive: true,
+    hsnCode: null,
+    taxRate: null,
+  },
+  {
+    id: 'catalog-product-3',
+    categoryId: 'cat-milk',
+    name: 'Low Fat Milk',
+    description: 'Toned, lower-fat milk.',
+    unit: '500ml Pouch',
+    price: 32,
+    priceB2b: null,
+    imageUrl: null,
+    tag: null,
+    subscriptionEligible: false,
+    isVeg: true,
+    isOrganic: false,
+    stockState: 'OUT_OF_STOCK',
+    availableFrom: null,
+    isActive: false,
+    hsnCode: null,
+    taxRate: null,
+  },
+  {
+    id: 'catalog-product-4',
+    categoryId: 'cat-curd',
+    name: 'Set Curd',
+    description: 'Thick, set-style curd.',
+    unit: '400g Cup',
+    price: 45,
+    priceB2b: null,
+    imageUrl: null,
+    tag: 'New',
+    subscriptionEligible: false,
+    isVeg: true,
+    isOrganic: true,
+    stockState: 'IN_STOCK',
+    availableFrom: null,
+    isActive: true,
+    hsnCode: '0403',
+    taxRate: 5,
+  },
+  {
+    id: 'catalog-product-5',
+    categoryId: 'cat-curd',
+    name: 'Greek Yogurt',
+    description: 'High-protein strained yogurt.',
+    unit: '200g Cup',
+    price: 95,
+    priceB2b: null,
+    imageUrl: null,
+    tag: null,
+    subscriptionEligible: false,
+    isVeg: true,
+    isOrganic: false,
+    stockState: 'IN_STOCK',
+    availableFrom: null,
+    isActive: true,
+    hsnCode: null,
+    taxRate: null,
+  },
+];
+
+/** Keyed by product id, each entry's array stored newest-first (already
+ * reverse-chronological) so appendCatalogAuditEntry below only ever needs
+ * to unshift - same convention as inventoryAuditLog above. */
+export const catalogAuditLog: Record<string, CatalogAuditLogEntry[]> = {
+  'catalog-product-1': [
+    {
+      id: 'catalog-audit-2',
+      productId: 'catalog-product-1',
+      adminId: 'admin-2',
+      action: 'UPDATE',
+      previousValue: { price: 65 },
+      newValue: { price: 68 },
+      reason: 'Seasonal price adjustment',
+      createdAt: '2026-09-28T10:00:00.000Z',
+    },
+    {
+      id: 'catalog-audit-1',
+      productId: 'catalog-product-1',
+      adminId: 'admin-1',
+      action: 'CREATE',
+      previousValue: null,
+      newValue: {
+        categoryId: 'cat-milk',
+        name: 'Cow Milk',
+        price: 65,
+        isActive: true,
+      },
+      reason: 'Initial catalog setup',
+      createdAt: '2026-09-01T08:00:00.000Z',
+    },
+  ],
+  // catalog-product-3: INACTIVE, but no audit entry for the deactivation
+  // itself in this seed (the real action is exercised live via the
+  // deactivate E2E scenario instead of pre-seeded here).
+};
+
+export function findCatalogProduct(productId: string): CatalogProduct | undefined {
+  return catalogProducts.find((p) => p.id === productId);
+}
+
+export function findCatalogCategory(categoryId: string): CatalogCategory | undefined {
+  return catalogCategories.find((c) => c.id === categoryId);
+}
+
+export function getCatalogAuditLog(productId: string): CatalogAuditLogEntry[] {
+  return catalogAuditLog[productId] ?? [];
+}
+
+export function appendCatalogAuditEntry(productId: string, entry: CatalogAuditLogEntry) {
+  catalogAuditLog[productId] = [entry, ...(catalogAuditLog[productId] ?? [])];
+}
+
+let catalogProductIdCounter = catalogProducts.length + 1;
+export function nextCatalogProductId(): string {
+  return `catalog-product-${catalogProductIdCounter++}`;
+}
+
+let catalogCategoryIdCounter = catalogCategories.length + 1;
+export function nextCatalogCategoryId(): string {
+  return `cat-${catalogCategoryIdCounter++}`;
+}
+
+let catalogAuditIdCounter = 3;
+export function nextCatalogAuditId(): string {
+  return `catalog-audit-${catalogAuditIdCounter++}`;
 }
