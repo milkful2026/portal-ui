@@ -4,13 +4,19 @@ import {
   ApiError,
   BulkCustomerStatusRequest,
   BulkCustomerStatusResponseData,
+  CatalogCategory,
+  CatalogProduct,
   CreateAdminUserRequest,
+  CreateCatalogCategoryRequest,
+  CreateCatalogProductRequest,
   AdminUser,
   CustomerAccount,
   CustomerAccountDetail,
   DeactivateCustomerRequest,
   InventoryItem,
+  ListAdminProductsResponseData,
   ListAdminUsersResponseData,
+  ListCatalogAuditLogResponseData,
   ListCustomerAccountsResponseData,
   ListInventoryAuditLogResponseData,
   ListInventoryResponseData,
@@ -25,6 +31,8 @@ import {
   TwoFactorVerifyRequest,
   TwoFactorVerifyResponseData,
   UpdateAdminUserRequest,
+  UpdateCatalogCategoryRequest,
+  UpdateCatalogProductRequest,
 } from './types';
 
 const BASE_URL = '/v1';
@@ -180,4 +188,48 @@ export const inventoryApi = {
     request<InventoryItem>('/inventory', { method: 'PATCH', body: JSON.stringify(payload) }),
   receive: (payload: ReceiveStockRequest) =>
     request<ReceiveStockResponseData>('/inventory/receive', { method: 'POST', body: JSON.stringify(payload) }),
+};
+
+// MA-156 (Catalog Service) admin product/category endpoints - see
+// specs/portal-ui/tasks/MA/MA-42/MA-157.md section 4/6. Client-side paths
+// here stay under this app's existing '/v1/...' namespace (BASE_URL,
+// matching every other API above) even though the REAL catalog service's
+// routes have no /v1 prefix at all (confirmed directly from
+// catalog/src/handlers/app.py's include_router() calls) - vite.config.ts's
+// proxy strips it back off before forwarding to the real backend; MSW's
+// mock handlers match these same '/v1/...' paths, so neither layer needs
+// to know about that mismatch except the one proxy rule.
+export const catalogApi = {
+  // pageSize=500 - the backend's own declared max
+  // (admin_catalog_handler.py's `Query(default=50, ge=1, le=500)`),
+  // same "load the realistic full catalog in one call" choice as
+  // inventoryApi.getAuditLog/catalogApi.getAuditLog (code review
+  // finding: this was left at the backend's default 50 with no
+  // override, silently truncating any catalog past that size with no
+  // truncation notice, unlike every other list this app loads).
+  listAdmin: (categoryId?: string, isActive?: boolean) => {
+    const params = new URLSearchParams();
+    if (categoryId) params.set('categoryId', categoryId);
+    if (isActive !== undefined) params.set('isActive', String(isActive));
+    params.set('pageSize', '500');
+    return request<ListAdminProductsResponseData>(`/admin/products?${params.toString()}`, { method: 'GET' });
+  },
+  listCategories: () => request<CatalogCategory[]>('/categories', { method: 'GET' }),
+  getProduct: (productId: string) => request<CatalogProduct>(`/products/${productId}`, { method: 'GET' }),
+  createProduct: (payload: CreateCatalogProductRequest) =>
+    request<CatalogProduct>('/products', { method: 'POST', body: JSON.stringify(payload) }),
+  updateProduct: (productId: string, payload: UpdateCatalogProductRequest) =>
+    request<CatalogProduct>(`/products/${productId}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  // pageSize=500 - same "load the realistic full history in one call, not
+  // true pagination" choice as inventoryApi.getAuditLog above, for the
+  // identical reason (see InventoryDetailPage.tsx's own truncation-notice
+  // handling, mirrored by CatalogDetailPage).
+  getAuditLog: (productId: string) =>
+    request<ListCatalogAuditLogResponseData>(`/products/${productId}/audit-log?pageSize=500`, {
+      method: 'GET',
+    }),
+  createCategory: (payload: CreateCatalogCategoryRequest) =>
+    request<CatalogCategory>('/categories', { method: 'POST', body: JSON.stringify(payload) }),
+  updateCategory: (categoryId: string, payload: UpdateCatalogCategoryRequest) =>
+    request<CatalogCategory>(`/categories/${categoryId}`, { method: 'PATCH', body: JSON.stringify(payload) }),
 };

@@ -7,6 +7,10 @@ import CustomerAccountsPage from './pages/customer-accounts/CustomerAccountsPage
 import CustomerDetailPage from './pages/customer-accounts/CustomerDetailPage';
 import InventoryListPage from './pages/inventory/InventoryListPage';
 import InventoryDetailPage from './pages/inventory/InventoryDetailPage';
+import CatalogListPage from './pages/catalog/CatalogListPage';
+import CatalogCreatePage from './pages/catalog/CatalogCreatePage';
+import CatalogDetailPage from './pages/catalog/CatalogDetailPage';
+import CategoriesPage from './pages/catalog/CategoriesPage';
 import ForbiddenPage from './pages/forbidden/ForbiddenPage';
 import AppLayout from './components/layout/AppLayout';
 import { RequireAuth, RequireRole, RequireSuperAdmin } from './routes/guards';
@@ -71,6 +75,41 @@ export default function App() {
           element={
             <RequireRole roles={['Ops', 'SuperAdmin']}>
               <InventoryDetailPage />
+            </RequireRole>
+          }
+        />
+        {/* FR-1: Ops + SuperAdmin only, identical gate to Inventory above -
+            spec section 4 explicitly follows that same precedent rather
+            than re-litigating the role split. */}
+        <Route
+          path="/catalog"
+          element={
+            <RequireRole roles={['Ops', 'SuperAdmin']}>
+              <CatalogListPage />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/catalog/categories"
+          element={
+            <RequireRole roles={['Ops', 'SuperAdmin']}>
+              <CategoriesPage />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/catalog/new"
+          element={
+            <RequireRole roles={['Ops', 'SuperAdmin']}>
+              <CatalogCreatePage />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/catalog/:productId"
+          element={
+            <RequireRole roles={['Ops', 'SuperAdmin']}>
+              <CatalogDetailPage />
             </RequireRole>
           }
         />

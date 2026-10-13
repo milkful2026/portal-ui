@@ -1,14 +1,20 @@
 import { http, HttpResponse } from 'msw';
 import {
   adminUsers,
+  appendCatalogAuditEntry,
   appendCustomerHistory,
   appendProductAuditEntry,
   appendProductBatch,
+  catalogCategories,
+  catalogProducts,
   customerAccounts,
   findByEmail,
   findById,
+  findCatalogCategory,
+  findCatalogProduct,
   findCustomerById,
   findInventoryRecord,
+  getCatalogAuditLog,
   getCustomerHistory,
   getProductAuditLog,
   getProductBatches,
@@ -16,6 +22,9 @@ import {
   MOCK_PASSWORD,
   MOCK_TOTP_CODE,
   nextBatchId,
+  nextCatalogAuditId,
+  nextCatalogCategoryId,
+  nextCatalogProductId,
   nextId,
 } from './db';
 import { buildMockJwt } from './jwt';
@@ -30,7 +39,11 @@ import {
   BulkCustomerAction,
   BulkCustomerStatusRequest,
   BulkCustomerStatusResultItem,
+  CatalogErrorCode,
+  CatalogProduct,
   CreateAdminUserRequest,
+  CreateCatalogCategoryRequest,
+  CreateCatalogProductRequest,
   CustomerAccount,
   CustomerErrorCode,
   CustomerStatus,
@@ -44,6 +57,8 @@ import {
   SuspendCustomerRequest,
   TwoFactorVerifyRequest,
   UpdateAdminUserRequest,
+  UpdateCatalogCategoryRequest,
+  UpdateCatalogProductRequest,
 } from '../api/types';
 import { InventoryRecord } from './db';
 
@@ -129,6 +144,20 @@ function requireInventoryRole(request: Request): Response | null {
   return null;
 }
 
+// MA-157 FR-6: same Ops + SuperAdmin gate as requireInventoryRole above -
+// a separate function (not reused directly) purely so each contract's
+// error-code taxonomy stays independent, same reasoning as every other
+// require*Role helper here.
+function requireCatalogRole(request: Request): Response | null {
+  const authError = requireAuth(request);
+  if (authError) return authError;
+  const decoded = decodeMockJwt(request);
+  if (!decoded || !(['Ops', 'SuperAdmin'] as AdminRole[]).includes(decoded.role)) {
+    return fail(CatalogErrorCode.FORBIDDEN, 'Permission denied', 403);
+  }
+  return null;
+}
+
 /** Builds the API-facing InventoryItem from the mutable DB record plus its
  * batches - `available`/`stockState` are ALWAYS derived here, never read
  * off a stored (and therefore staleable) field. See db.ts's own docstring
@@ -144,6 +173,24 @@ function toInventoryItem(record: InventoryRecord): InventoryItem {
     available,
     stockState,
     lowStockThreshold: record.lowStockThreshold,
+  };
+}
+
+/** Projects the mock's full CatalogProduct record down to GET
+ * /admin/products' narrower AdminProductListItem shape - mirrors the
+ * real backend's AdminProductSummary projection (see api/types.ts's own
+ * module docstring for why this is deliberately not the full shape). */
+function toAdminProductListItem(product: CatalogProduct) {
+  return {
+    id: product.id,
+    categoryId: product.categoryId,
+    name: product.name,
+    priceB2c: product.price,
+    priceB2b: product.priceB2b,
+    isActive: product.isActive,
+    stockState: product.stockState,
+    createdAt: '2026-09-01T00:00:00.000Z',
+    updatedAt: '2026-09-01T00:00:00.000Z',
   };
 }
 
@@ -668,5 +715,228 @@ export const handlers = [
       },
       201,
     );
+  }),
+
+  // ---- MA-157 Admin Catalog Management (MA-156 contract) ----
+
+  http.get('/v1/admin/products', ({ request }) => {
+    const authError = requireCatalogRole(request);
+    if (authError) return authError;
+    const url = new URL(request.url);
+    const categoryId = url.searchParams.get('categoryId');
+    const isActiveParam = url.searchParams.get('isActive');
+    let items = catalogProducts.map(toAdminProductListItem);
+    if (categoryId) {
+      items = items.filter((p) => p.categoryId === categoryId);
+    }
+    if (isActiveParam !== null) {
+      const wantActive = isActiveParam === 'true';
+      items = items.filter((p) => p.isActive === wantActive);
+    }
+    return ok({ items, total: items.length, page: 1, pageSize: items.length || 50 });
+  }),
+
+  http.get('/v1/categories', ({ request }) => {
+    // No auth required - matches the real backend's own public read
+    // (MA-156 §4: only the admin-write routes are gated).
+    void request;
+    return ok(catalogCategories);
+  }),
+
+  http.get('/v1/products/:productId/audit-log', ({ request, params }) => {
+    const authError = requireCatalogRole(request);
+    if (authError) return authError;
+    const product = findCatalogProduct(params.productId as string);
+    if (!product) {
+      return fail(CatalogErrorCode.PRODUCT_NOT_FOUND, 'Product not found', 404);
+    }
+    // Already stored newest-first (appendCatalogAuditEntry only ever
+    // unshifts) - FR-4's "newest-first" audit-trail requirement.
+    const entries = getCatalogAuditLog(product.id);
+    return ok({ items: entries, total: entries.length, page: 1, pageSize: entries.length || 50 });
+  }),
+
+  // GET /v1/products/{productId} (full detail, FR-4) - kept after the
+  // more specific /:productId/audit-log route above since MSW matches
+  // path patterns in registration order and a bare '/:productId' would
+  // otherwise shadow it (same ordering lesson the inventory handlers
+  // above, and vite.config.ts's proxy rules, both already apply). No
+  // auth required - matches the real GET /products/{id}'s own public
+  // read (same endpoint the consumer app uses; FR-7's is_active-doesn't-
+  // 404 behavior from MA-156 lives here too, not just on the real
+  // backend).
+  http.get('/v1/products/:productId', ({ request, params }) => {
+    void request;
+    const product = findCatalogProduct(params.productId as string);
+    if (!product) {
+      return fail(CatalogErrorCode.PRODUCT_NOT_FOUND, 'Product not found', 404);
+    }
+    return ok(product);
+  }),
+
+  http.post('/v1/products', async ({ request }) => {
+    const authError = requireCatalogRole(request);
+    if (authError) return authError;
+    const body = (await request.json()) as CreateCatalogProductRequest;
+
+    if (!body.name?.trim()) {
+      return fail(CatalogErrorCode.VALIDATION_ERROR, 'name must not be empty', 400);
+    }
+    if (!body.unit?.trim()) {
+      return fail(CatalogErrorCode.VALIDATION_ERROR, 'unit must not be empty', 400);
+    }
+    if (!(body.priceB2c > 0)) {
+      return fail(CatalogErrorCode.VALIDATION_ERROR, 'priceB2c must be a positive number', 400);
+    }
+    if (!findCatalogCategory(body.categoryId)) {
+      return fail(CatalogErrorCode.CATEGORY_NOT_FOUND, `Unknown category '${body.categoryId}'`, 404);
+    }
+
+    const product: CatalogProduct = {
+      id: nextCatalogProductId(),
+      categoryId: body.categoryId,
+      name: body.name,
+      description: body.description,
+      unit: body.unit,
+      price: body.priceB2c,
+      priceB2b: body.priceB2b ?? null,
+      imageUrl: body.imageUrl ?? null,
+      tag: body.tag ?? null,
+      subscriptionEligible: body.subscriptionEligible,
+      isVeg: body.isVeg,
+      isOrganic: body.isOrganic,
+      stockState: 'IN_STOCK',
+      availableFrom: null,
+      isActive: true,
+      hsnCode: body.hsnCode ?? null,
+      taxRate: body.taxRate ?? null,
+    };
+    catalogProducts.push(product);
+
+    const decoded = decodeMockJwt(request);
+    appendCatalogAuditEntry(product.id, {
+      id: nextCatalogAuditId(),
+      productId: product.id,
+      adminId: decoded?.sub ?? 'admin-1',
+      action: 'CREATE',
+      previousValue: null,
+      newValue: { ...product },
+      reason: body.reason ?? null,
+      createdAt: new Date().toISOString(),
+    });
+
+    return ok(product, 201);
+  }),
+
+  http.patch('/v1/products/:productId', async ({ request, params }) => {
+    const authError = requireCatalogRole(request);
+    if (authError) return authError;
+    const product = findCatalogProduct(params.productId as string);
+    if (!product) {
+      return fail(CatalogErrorCode.PRODUCT_NOT_FOUND, 'Product not found', 404);
+    }
+    const body = (await request.json()) as UpdateCatalogProductRequest;
+
+    if (body.categoryId !== undefined && !findCatalogCategory(body.categoryId)) {
+      return fail(CatalogErrorCode.CATEGORY_NOT_FOUND, `Unknown category '${body.categoryId}'`, 404);
+    }
+    if (body.priceB2c !== undefined && !(body.priceB2c > 0)) {
+      return fail(CatalogErrorCode.VALIDATION_ERROR, 'priceB2c must be a positive number', 400);
+    }
+    if (body.name !== undefined && !body.name.trim()) {
+      return fail(CatalogErrorCode.VALIDATION_ERROR, 'name must not be empty', 400);
+    }
+    if (body.unit !== undefined && !body.unit.trim()) {
+      return fail(CatalogErrorCode.VALIDATION_ERROR, 'unit must not be empty', 400);
+    }
+
+    // Only the fields the caller actually sent get diffed into the audit
+    // row's previous/new value - matches MA-156 FR-2's "changed fields
+    // only" audit shape, not the whole row.
+    const previousValue: Record<string, unknown> = {};
+    const newValue: Record<string, unknown> = {};
+    const fieldMap: Record<string, keyof CatalogProduct> = {
+      categoryId: 'categoryId',
+      name: 'name',
+      description: 'description',
+      unit: 'unit',
+      priceB2c: 'price',
+      priceB2b: 'priceB2b',
+      imageUrl: 'imageUrl',
+      tag: 'tag',
+      subscriptionEligible: 'subscriptionEligible',
+      isVeg: 'isVeg',
+      isOrganic: 'isOrganic',
+      hsnCode: 'hsnCode',
+      taxRate: 'taxRate',
+      isActive: 'isActive',
+    };
+    for (const [wireKey, productKey] of Object.entries(fieldMap) as [keyof UpdateCatalogProductRequest, keyof CatalogProduct][]) {
+      if (body[wireKey] === undefined) continue;
+      const nextVal = body[wireKey];
+      if (product[productKey] === nextVal) continue;
+      previousValue[wireKey] = product[productKey];
+      (product as unknown as Record<string, unknown>)[productKey] = nextVal;
+      newValue[wireKey] = nextVal;
+    }
+
+    if (Object.keys(newValue).length > 0) {
+      const decoded = decodeMockJwt(request);
+      appendCatalogAuditEntry(product.id, {
+        id: nextCatalogAuditId(),
+        productId: product.id,
+        adminId: decoded?.sub ?? 'admin-1',
+        action: 'UPDATE',
+        previousValue,
+        newValue,
+        reason: body.reason ?? null,
+        createdAt: new Date().toISOString(),
+      });
+    }
+
+    return ok(product);
+  }),
+
+  http.post('/v1/categories', async ({ request }) => {
+    const authError = requireCatalogRole(request);
+    if (authError) return authError;
+    const body = (await request.json()) as CreateCatalogCategoryRequest;
+    // Mirrors the product handlers' own validation above - client
+    // validation is UX only, never the authorization/validation
+    // boundary (same principle AdjustStockDialog's own comment states).
+    if (!body.name?.trim()) {
+      return fail(CatalogErrorCode.VALIDATION_ERROR, 'name must not be empty', 400);
+    }
+    if (!body.iconName?.trim()) {
+      return fail(CatalogErrorCode.VALIDATION_ERROR, 'iconName must not be empty', 400);
+    }
+    const category = {
+      id: nextCatalogCategoryId(),
+      name: body.name,
+      iconName: body.iconName,
+      sortOrder: body.sortOrder ?? 0,
+    };
+    catalogCategories.push(category);
+    return ok(category, 201);
+  }),
+
+  http.patch('/v1/categories/:categoryId', async ({ request, params }) => {
+    const authError = requireCatalogRole(request);
+    if (authError) return authError;
+    const category = findCatalogCategory(params.categoryId as string);
+    if (!category) {
+      return fail(CatalogErrorCode.CATEGORY_NOT_FOUND, 'Category not found', 404);
+    }
+    const body = (await request.json()) as UpdateCatalogCategoryRequest;
+    if (body.name !== undefined && !body.name.trim()) {
+      return fail(CatalogErrorCode.VALIDATION_ERROR, 'name must not be empty', 400);
+    }
+    if (body.iconName !== undefined && !body.iconName.trim()) {
+      return fail(CatalogErrorCode.VALIDATION_ERROR, 'iconName must not be empty', 400);
+    }
+    if (body.name !== undefined) category.name = body.name;
+    if (body.iconName !== undefined) category.iconName = body.iconName;
+    if (body.sortOrder !== undefined) category.sortOrder = body.sortOrder;
+    return ok(category);
   }),
 ];
